@@ -187,12 +187,31 @@ pub struct AutoUpdater {
     update_check_type: UpdateCheckType,
     _wake_subscription: gpui::Subscription,
     dismissed_status: Option<AutoUpdateStatus>,
+    downloaded_custom_build_id: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct ReleaseAsset {
     pub version: String,
     pub url: String,
+    #[serde(default)]
+    pub build_id: Option<String>,
+}
+
+fn custom_update_repo() -> Option<String> {
+    env::var("ZED_CUSTOM_UPDATE_REPO")
+        .ok()
+        .or_else(|| option_env!("ZED_CUSTOM_UPDATE_REPO").map(str::to_string))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn custom_update_build_id() -> Option<String> {
+    env::var("ZED_CUSTOM_UPDATE_BUILD_ID")
+        .ok()
+        .or_else(|| option_env!("ZED_CUSTOM_UPDATE_BUILD_ID").map(str::to_string))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 struct MacOsUnmounter<'a> {
@@ -468,6 +487,7 @@ impl AutoUpdater {
             update_check_type: UpdateCheckType::Automatic,
             _wake_subscription: wake_subscription,
             dismissed_status: None,
+            downloaded_custom_build_id: None,
         }
     }
 
@@ -737,16 +757,49 @@ impl AutoUpdater {
         })
     }
 
+    async fn get_custom_release_asset(
+        client: &Arc<HttpClientWithUrl>,
+        repo: &str,
+        os: &str,
+        arch: &str,
+    ) -> Result<ReleaseAsset> {
+        let url = format!(
+            "https://github.com/{repo}/releases/latest/download/release-{os}-{arch}.json"
+        );
+        let mut response = client.get(&url, Default::default(), true).await?;
+        let mut body = Vec::new();
+        response.body_mut().read_to_end(&mut body).await?;
+
+        anyhow::ensure!(
+            response.status().is_success(),
+            "failed to fetch custom release from {url}: {:?}",
+            String::from_utf8_lossy(&body),
+        );
+
+        serde_json::from_slice(body.as_slice()).with_context(|| {
+            format!(
+                "error deserializing custom release from {url}: {:?}",
+                String::from_utf8_lossy(&body),
+            )
+        })
+    }
+
     async fn update(this: Entity<Self>, cx: &mut AsyncApp) -> Result<()> {
-        let (client, installed_version, previous_status, release_channel) =
-            this.read_with(cx, |this, cx| {
-                (
-                    this.client.http_client(),
-                    this.current_version.clone(),
-                    this.status.clone(),
-                    ReleaseChannel::try_global(cx).unwrap_or(ReleaseChannel::Stable),
-                )
-            });
+        let (
+            client,
+            installed_version,
+            previous_status,
+            downloaded_custom_build_id,
+            release_channel,
+        ) = this.read_with(cx, |this, cx| {
+            (
+                this.client.http_client(),
+                this.current_version.clone(),
+                this.status.clone(),
+                this.downloaded_custom_build_id.clone(),
+                ReleaseChannel::try_global(cx).unwrap_or(ReleaseChannel::Stable),
+            )
+        });
 
         Self::check_dependencies()?;
 
@@ -756,17 +809,34 @@ impl AutoUpdater {
             cx.notify();
         });
 
-        let fetched_release_data =
-            Self::get_release_asset(&this, release_channel, None, "zed", OS, ARCH, cx).await?;
-        let fetched_version = fetched_release_data.clone().version;
-        let app_commit_sha = Ok(cx.update(|cx| AppCommitSha::try_global(cx).map(|sha| sha.full())));
-        let newer_version = Self::check_if_fetched_version_is_newer(
-            release_channel,
-            app_commit_sha,
-            installed_version,
-            fetched_version,
-            previous_status.clone(),
-        )?;
+        let custom_repo = custom_update_repo();
+        let fetched_release_data = if let Some(repo) = custom_repo.as_deref() {
+            Self::get_custom_release_asset(&client, repo, OS, ARCH).await?
+        } else {
+            Self::get_release_asset(&this, release_channel, None, "zed", OS, ARCH, cx).await?
+        };
+        let fetched_version = fetched_release_data.version.clone();
+        let fetched_build_id = fetched_release_data.build_id.clone();
+        let newer_version = if custom_repo.is_some() {
+            Self::check_if_custom_release_is_newer(
+                installed_version,
+                custom_update_build_id().as_deref(),
+                downloaded_custom_build_id.as_deref(),
+                fetched_version,
+                fetched_build_id.as_deref(),
+                previous_status.clone(),
+            )?
+        } else {
+            let app_commit_sha =
+                Ok(cx.update(|cx| AppCommitSha::try_global(cx).map(|sha| sha.full())));
+            Self::check_if_fetched_version_is_newer(
+                release_channel,
+                app_commit_sha,
+                installed_version,
+                fetched_version,
+                previous_status.clone(),
+            )?
+        };
 
         let Some(newer_version) = newer_version else {
             this.update(cx, |this, cx| {
@@ -857,12 +927,50 @@ impl AutoUpdater {
         this.update(cx, |this, cx| {
             this.set_should_show_update_notification(true, cx)
                 .detach_and_log_err(cx);
+            if fetched_build_id.is_some() {
+                this.downloaded_custom_build_id = fetched_build_id;
+            }
             this.status = AutoUpdateStatus::Updated {
                 version: newer_version,
             };
             cx.notify();
         });
         Ok(())
+    }
+
+    fn check_if_custom_release_is_newer(
+        installed_version: Version,
+        current_build_id: Option<&str>,
+        downloaded_build_id: Option<&str>,
+        fetched_version: String,
+        fetched_build_id: Option<&str>,
+        status: AutoUpdateStatus,
+    ) -> Result<Option<Version>> {
+        let mut fetched_version = fetched_version.parse::<Version>()?;
+        fetched_version.pre = semver::Prerelease::EMPTY;
+        fetched_version.build = semver::BuildMetadata::EMPTY;
+
+        let mut base_version = match status {
+            AutoUpdateStatus::Updated { version } => version,
+            _ => installed_version,
+        };
+        base_version.pre = semver::Prerelease::EMPTY;
+        base_version.build = semver::BuildMetadata::EMPTY;
+
+        if fetched_version > base_version {
+            return Ok(Some(fetched_version));
+        }
+
+        if fetched_version == base_version {
+            let effective_build_id = downloaded_build_id.or(current_build_id);
+            if let Some(fetched_id) = fetched_build_id.filter(|id| !id.is_empty()) {
+                if effective_build_id != Some(fetched_id) {
+                    return Ok(Some(fetched_version));
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     fn check_if_fetched_version_is_newer(
@@ -1536,6 +1644,7 @@ mod tests {
         let release = ReleaseAsset {
             version: "1.0.0".to_string(),
             url: "https://test.example/download".to_string(),
+            build_id: None,
         };
 
         let reported = Rc::new(std::cell::RefCell::new(Vec::<f32>::new()));
@@ -1596,6 +1705,7 @@ mod tests {
         let release = ReleaseAsset {
             version: "1.0.0".to_string(),
             url: "https://test.example/download".to_string(),
+            build_id: None,
         };
 
         let reported = Rc::new(std::cell::RefCell::new(Vec::<Option<f32>>::new()));
@@ -1882,6 +1992,69 @@ mod tests {
         assert_eq!(
             newer_version.unwrap(),
             Some(fetched_version.parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_custom_release_update_detection() {
+        let installed = semver::Version::new(1, 29, 3);
+
+        // Newer upstream version triggers update.
+        assert_eq!(
+            AutoUpdater::check_if_custom_release_is_newer(
+                installed.clone(),
+                Some("100"),
+                None,
+                "1.30.0".to_string(),
+                Some("101"),
+                AutoUpdateStatus::Idle,
+            )
+            .unwrap(),
+            Some(semver::Version::new(1, 30, 0))
+        );
+
+        // Same upstream version with a different custom build_id triggers update.
+        assert_eq!(
+            AutoUpdater::check_if_custom_release_is_newer(
+                installed.clone(),
+                Some("100"),
+                None,
+                "1.29.3".to_string(),
+                Some("101"),
+                AutoUpdateStatus::Idle,
+            )
+            .unwrap(),
+            Some(semver::Version::new(1, 29, 3))
+        );
+
+        // Same version and same build_id does not trigger update.
+        assert_eq!(
+            AutoUpdater::check_if_custom_release_is_newer(
+                installed.clone(),
+                Some("100"),
+                None,
+                "1.29.3".to_string(),
+                Some("100"),
+                AutoUpdateStatus::Idle,
+            )
+            .unwrap(),
+            None
+        );
+
+        // Already downloaded custom build_id in current session does not re-download.
+        assert_eq!(
+            AutoUpdater::check_if_custom_release_is_newer(
+                installed,
+                Some("100"),
+                Some("101"),
+                "1.29.3".to_string(),
+                Some("101"),
+                AutoUpdateStatus::Updated {
+                    version: semver::Version::new(1, 29, 3),
+                },
+            )
+            .unwrap(),
+            None
         );
     }
 }

@@ -187,6 +187,9 @@ jobs:
 
       - name: Package Zed Custom.app and Zed-Custom-aarch64.dmg
         id: package
+        env:
+          CUSTOM_CODESIGN_P12: ${{ secrets.CUSTOM_CODESIGN_P12 }}
+          CUSTOM_CODESIGN_PASSWORD: ${{ secrets.CUSTOM_CODESIGN_PASSWORD }}
         run: |
           set -euo pipefail
           target_triple="aarch64-apple-darwin"
@@ -246,7 +249,37 @@ jobs:
 
           # Do not copy official embedded.provisionprofile since CFBundleIdentifier is customized
           sed '/com.apple.developer.associated-domains/,+1d' crates/zed/resources/zed.entitlements > "${app_path}/Contents/Resources/zed.entitlements"
-          codesign --force --deep --entitlements "${app_path}/Contents/Resources/zed.entitlements" --sign - "${app_path}" -v
+          if [[ -n "${CUSTOM_CODESIGN_P12:-}" && -n "${CUSTOM_CODESIGN_PASSWORD:-}" ]]; then
+            echo "Signing with custom persistent code-signing certificate..."
+            SIGN_KEYCHAIN="zed-custom-signing.keychain-db"
+            KEYCHAIN_PASS="$(openssl rand -hex 16)"
+            P12_FILE="$(mktemp).p12"
+            cleanup_signing() {
+              rm -f "$P12_FILE"
+              security delete-keychain "$SIGN_KEYCHAIN" 2>/dev/null || true
+            }
+            trap cleanup_signing EXIT
+
+            security create-keychain -p "$KEYCHAIN_PASS" "$SIGN_KEYCHAIN"
+            security set-keychain-settings "$SIGN_KEYCHAIN"
+            security unlock-keychain -p "$KEYCHAIN_PASS" "$SIGN_KEYCHAIN"
+            security list-keychains -d user -s "$SIGN_KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+            printf '%s' "$CUSTOM_CODESIGN_P12" | base64 --decode > "$P12_FILE"
+            security import "$P12_FILE" -k "$SIGN_KEYCHAIN" -P "$CUSTOM_CODESIGN_PASSWORD" -T /usr/bin/codesign
+            rm -f "$P12_FILE"
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$SIGN_KEYCHAIN"
+
+            SIGN_IDENTITY="$(security find-identity -p codesigning "$SIGN_KEYCHAIN" | awk '/1\)/{print $2; exit}')"
+            if [[ -z "$SIGN_IDENTITY" ]]; then
+              echo "Failed to locate code-signing identity in imported P12" >&2
+              exit 1
+            fi
+            codesign --force --deep --keychain "$SIGN_KEYCHAIN" --entitlements "${app_path}/Contents/Resources/zed.entitlements" --sign "$SIGN_IDENTITY" "${app_path}" -v
+          else
+            echo "CUSTOM_CODESIGN_P12 not set; falling back to ad-hoc signing"
+            codesign --force --deep --entitlements "${app_path}/Contents/Resources/zed.entitlements" --sign - "${app_path}" -v
+          fi
 
           dmg_dir="target/${target_triple}/release/dmg"
           dmg_path="target/${target_triple}/release/Zed-Custom-aarch64.dmg"

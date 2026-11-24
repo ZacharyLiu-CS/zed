@@ -182,12 +182,14 @@ jobs:
           strip -x target/aarch64-apple-darwin/release/zed
           strip -x target/aarch64-apple-darwin/release/cli
 
-      - name: Package Zed.app and Zed-aarch64.dmg
+      - name: Package Zed Custom.app and Zed-Custom-aarch64.dmg
         id: package
         run: |
           set -euo pipefail
           target_triple="aarch64-apple-darwin"
           channel="stable"
+          custom_app_name="Zed Custom"
+          custom_bundle_id="dev.zed.Zed-Custom"
 
           pushd crates/zed
           cp Cargo.toml Cargo.toml.backup
@@ -196,6 +198,18 @@ jobs:
           mv Cargo.toml.backup Cargo.toml
           rm -f Cargo.toml.backup
           popd
+
+          custom_app_path="$(dirname "${app_path}")/${custom_app_name}.app"
+          rm -rf "${custom_app_path}"
+          mv "${app_path}" "${custom_app_path}"
+          app_path="${custom_app_path}"
+
+          # Customize bundle identity so Zed Custom.app coexists alongside official Zed.app
+          plist="${app_path}/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${custom_bundle_id}" "${plist}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName ${custom_app_name}" "${plist}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName ${custom_app_name}" "${plist}" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string ${custom_app_name}" "${plist}"
 
           echo "Bundled: ${app_path}"
 
@@ -227,25 +241,23 @@ jobs:
           mv "${tmp_git}/bin/git" "${app_path}/Contents/MacOS/git"
           rm -rf "${tmp_git}"
 
-          if [[ -f "crates/zed/contents/${channel}/embedded.provisionprofile" ]]; then
-            cp "crates/zed/contents/${channel}/embedded.provisionprofile" "${app_path}/Contents/"
-          fi
-
+          # Do not copy official embedded.provisionprofile since CFBundleIdentifier is customized
           sed '/com.apple.developer.associated-domains/,+1d' crates/zed/resources/zed.entitlements > "${app_path}/Contents/Resources/zed.entitlements"
           codesign --force --deep --entitlements "${app_path}/Contents/Resources/zed.entitlements" --sign - "${app_path}" -v
 
           dmg_dir="target/${target_triple}/release/dmg"
-          dmg_path="target/${target_triple}/release/Zed-aarch64.dmg"
+          dmg_path="target/${target_triple}/release/Zed-Custom-aarch64.dmg"
           rm -rf "${dmg_dir}" "${dmg_path}"
           mkdir -p "${dmg_dir}"
           mv "${app_path}" "${dmg_dir}/"
           ln -s /Applications "${dmg_dir}/Applications"
+          # Volume name must stay "Zed" to match AutoUpdater's install_release_macos mount path.
           hdiutil create -volname Zed -srcfolder "${dmg_dir}" -ov -format UDZO "${dmg_path}"
           rm -f "${dmg_dir}/Applications"
 
           ZED_VERSION="$(awk -F '"' '/^version *=/{print $2; exit}' crates/zed/Cargo.toml)"
           RELEASE_TAG="v${ZED_VERSION}-custom.${GITHUB_RUN_NUMBER}"
-          DMG_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/Zed-aarch64.dmg"
+          DMG_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/Zed-Custom-aarch64.dmg"
 
           cat > target/release-macos-aarch64.json <<EOF
           {

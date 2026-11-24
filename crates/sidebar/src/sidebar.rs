@@ -1,4 +1,9 @@
+mod agent_badges;
 mod thread_switcher;
+
+use crate::agent_badges::{
+    project_abbreviation, project_color_for_key, resolve_agent_badge, resolve_terminal_agent_badge,
+};
 
 use acp_thread::ThreadStatus;
 use action_log::DiffStats;
@@ -29,9 +34,9 @@ use feature_flags::{
 };
 use gpui::{
     Action as _, AnyElement, App, ClickEvent, Context, Decorations, DismissEvent, Entity, EntityId,
-    FocusHandle, Focusable, KeyContext, ListState, Modifiers, Pixels, Render, SharedString, Task,
-    TaskExt, WeakEntity, Window, WindowBackgroundAppearance, WindowHandle, linear_color_stop,
-    linear_gradient, list, prelude::*, px,
+    FocusHandle, Focusable, FontWeight, Hsla, KeyContext, ListState, Modifiers, Pixels, Render,
+    SharedString, Task, TaskExt, WeakEntity, Window, WindowBackgroundAppearance, WindowHandle,
+    linear_color_stop, linear_gradient, list, prelude::*, px,
 };
 use itertools::Itertools;
 use language_model::LanguageModelRegistry;
@@ -40,7 +45,7 @@ use menu::{
 };
 use notifications::status_toast::StatusToast;
 use platform_title_bar::apply_title_bar_insets;
-use project::{AgentId, AgentRegistryStore, Event as ProjectEvent, WorktreeId};
+use project::{AgentRegistryStore, Event as ProjectEvent, WorktreeId};
 use recent_projects::sidebar_recent_projects::SidebarRecentProjects;
 use remote::RemoteConnectionOptions;
 use ui::utils::platform_title_bar_height;
@@ -56,9 +61,10 @@ use std::sync::Arc;
 use theme::{ActiveTheme, CLIENT_SIDE_DECORATION_ROUNDING};
 use ui::{
     AgentThreadStatus, CommonAnimationExt, ContextMenu, ContextMenuEntry, Divider, GradientFade,
-    HighlightedLabel, KeyBinding, PopoverMenu, PopoverMenuHandle, ProjectEmptyState, ScrollAxes,
-    Scrollbars, Tab, ThreadItem, ThreadItemWorktreeInfo, TintColor, Tooltip, WithScrollbar,
-    prelude::*, render_modifiers, right_click_menu,
+    HighlightedLabel, KeyBinding, LineHeightStyle, PopoverMenu, PopoverMenuHandle,
+    ProjectEmptyState, ScrollAxes, Scrollbars, ThreadItem, ThreadItemAgentBadge,
+    ThreadItemProjectBadge, ThreadItemWorktreeInfo, TintColor, Tooltip, WithScrollbar, prelude::*,
+    render_modifiers, right_click_menu,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 use util::ResultExt as _;
@@ -354,6 +360,8 @@ struct ThreadEntry {
     metadata: ThreadMetadata,
     icon: IconName,
     icon_from_external_svg: Option<SharedString>,
+    project_badge: ThreadItemProjectBadge,
+    agent_badge: ThreadItemAgentBadge,
     status: AgentThreadStatus,
     workspace: ThreadEntryWorkspace,
     is_live: bool,
@@ -368,6 +376,8 @@ struct ThreadEntry {
 #[derive(Clone)]
 struct TerminalEntry {
     metadata: TerminalThreadMetadata,
+    project_badge: ThreadItemProjectBadge,
+    agent_badge: ThreadItemAgentBadge,
     workspace: ThreadEntryWorkspace,
     worktrees: Vec<ThreadItemWorktreeInfo>,
     has_notification: bool,
@@ -385,6 +395,11 @@ impl ThreadEntry {
         self.status = info.status;
         self.icon = info.icon;
         self.icon_from_external_svg = info.icon_from_external_svg.clone();
+        if self.agent_badge.custom_icon_from_external_svg.is_none()
+            && self.agent_badge.icon == IconName::Sparkle
+        {
+            self.agent_badge.custom_icon_from_external_svg = info.icon_from_external_svg.clone();
+        }
         self.is_live = true;
         self.is_background = info.is_background;
         self.is_title_generating = info.is_title_generating;
@@ -397,6 +412,8 @@ enum ListEntry {
     ProjectHeader {
         key: ProjectGroupKey,
         label: SharedString,
+        abbreviation: SharedString,
+        project_color: Hsla,
         highlight_positions: Vec<usize>,
         has_running_threads: bool,
         waiting_thread_count: usize,
@@ -1445,21 +1462,8 @@ impl Sidebar {
             .iter()
             .any(|ws| !workspace_path_list(ws, cx).paths().is_empty());
 
-        let resolve_agent_icon = |agent_id: &AgentId| -> (IconName, Option<SharedString>) {
-            let agent = Agent::from(agent_id.clone());
-            let icon = match agent {
-                Agent::NativeAgent => IconName::ZedAgent,
-                Agent::Custom { .. } => IconName::Terminal,
-
-                _ => IconName::ZedAgent,
-            };
-            let icon_from_external_svg = agent_server_store
-                .as_ref()
-                .and_then(|store| store.read(cx).agent_icon(&agent_id));
-            (icon, icon_from_external_svg)
-        };
-
         let groups = mw.project_groups(cx);
+        let mut used_project_color_indices: HashSet<usize> = HashSet::new();
         let mut live_notified_terminal_ids: HashSet<TerminalId> = HashSet::new();
         for workspace in &workspaces {
             if let Some(agent_panel) = workspace.read(cx).panel::<AgentPanel>(cx) {
@@ -1511,6 +1515,23 @@ impl Sidebar {
         for group in &groups {
             let group_key = &group.key;
             let group_workspaces = &group.workspaces;
+            let has_group_paths = !group_key.path_list().paths().is_empty();
+            let label = if has_group_paths {
+                group_key.display_name(&path_detail_map)
+            } else {
+                SharedString::default()
+            };
+            let abbreviation = project_abbreviation(label.as_ref());
+            let project_color = if has_group_paths {
+                project_color_for_key(group_key, &mut used_project_color_indices, cx)
+            } else {
+                cx.theme().colors().text_accent
+            };
+            let project_badge = ThreadItemProjectBadge {
+                abbreviation: abbreviation.clone(),
+                color: project_color,
+                full_name: has_group_paths.then(|| label.clone()),
+            };
 
             let workspace_by_path_list: HashMap<PathList, &Entity<Workspace>> = group_workspaces
                 .iter()
@@ -1533,8 +1554,11 @@ impl Sidebar {
                         worktree_info_from_thread_paths(&metadata.worktree_paths, &branch_by_path);
                     let has_notification =
                         live_notified_terminal_ids.contains(&metadata.terminal_id);
+                    let agent_badge = resolve_terminal_agent_badge(&metadata, cx);
                     TerminalEntry {
                         metadata,
+                        project_badge: project_badge.clone(),
+                        agent_badge,
                         workspace,
                         worktrees,
                         has_notification,
@@ -1606,11 +1630,9 @@ impl Sidebar {
                     .has_notification
                     .then_some(terminal.metadata.terminal_id)
             }));
-            if group_key.path_list().paths().is_empty() {
+            if !has_group_paths {
                 continue;
             }
-
-            let label = group_key.display_name(&path_detail_map);
 
             let is_collapsed = self.is_group_collapsed(group_key, cx);
             let should_load_threads = !is_collapsed || !query.is_empty();
@@ -1634,7 +1656,11 @@ impl Sidebar {
 
                 let make_thread_entry =
                     |row: ThreadMetadata, workspace: ThreadEntryWorkspace| -> Arc<ThreadEntry> {
-                        let (icon, icon_from_external_svg) = resolve_agent_icon(&row.agent_id);
+                        let agent_badge =
+                            resolve_agent_badge(&row.agent_id, agent_server_store.as_ref(), cx);
+                        let icon = agent_badge.icon;
+                        let icon_from_external_svg =
+                            agent_badge.custom_icon_from_external_svg.clone();
                         let worktrees =
                             worktree_info_from_thread_paths(&row.worktree_paths, &branch_by_path);
                         // Start drafts as `WithContent`; the post-processing
@@ -1645,6 +1671,8 @@ impl Sidebar {
                             metadata: row,
                             icon,
                             icon_from_external_svg,
+                            project_badge: project_badge.clone(),
+                            agent_badge,
                             status: AgentThreadStatus::default(),
                             workspace,
                             is_live: false,
@@ -1957,6 +1985,8 @@ impl Sidebar {
                 entries.push(ListEntry::ProjectHeader {
                     key: group_key.clone(),
                     label,
+                    abbreviation,
+                    project_color,
                     highlight_positions: workspace_highlight_positions,
                     has_running_threads,
                     waiting_thread_count,
@@ -2003,6 +2033,8 @@ impl Sidebar {
                 entries.push(ListEntry::ProjectHeader {
                     key: group_key.clone(),
                     label,
+                    abbreviation,
+                    project_color,
                     highlight_positions: Vec::new(),
                     has_running_threads,
                     waiting_thread_count,
@@ -2248,6 +2280,7 @@ impl Sidebar {
 
         let is_group_header_after_first =
             ix > 0 && matches!(entry, ListEntry::ProjectHeader { .. });
+        let is_item_entry = matches!(entry, ListEntry::Thread(_) | ListEntry::Terminal(_));
 
         let is_active = self
             .active_entry
@@ -2258,6 +2291,8 @@ impl Sidebar {
             ListEntry::ProjectHeader {
                 key,
                 label,
+                abbreviation,
+                project_color,
                 highlight_positions,
                 has_running_threads,
                 waiting_thread_count,
@@ -2275,6 +2310,8 @@ impl Sidebar {
                     false,
                     key,
                     label,
+                    abbreviation,
+                    *project_color,
                     highlight_positions,
                     *has_running_threads,
                     *waiting_thread_count,
@@ -2282,7 +2319,6 @@ impl Sidebar {
                     *is_active_group,
                     is_selected,
                     *has_threads,
-                    // has_active_draft,
                     cx,
                 )
             }
@@ -2295,8 +2331,20 @@ impl Sidebar {
         if is_group_header_after_first {
             v_flex()
                 .w_full()
-                .border_t_1()
-                .border_color(cx.theme().colors().border)
+                .pt_1p5()
+                .child(
+                    v_flex()
+                        .w_full()
+                        .border_t_1()
+                        .border_color(cx.theme().colors().border)
+                        .child(rendered),
+                )
+                .into_any_element()
+        } else if is_item_entry {
+            div()
+                .w_full()
+                .px_1()
+                .py(px(1.))
                 .child(rendered)
                 .into_any_element()
         } else {
@@ -2334,6 +2382,8 @@ impl Sidebar {
         is_sticky: bool,
         key: &ProjectGroupKey,
         label: &SharedString,
+        abbreviation: &SharedString,
+        project_color: Hsla,
         highlight_positions: &[usize],
         has_running_threads: bool,
         waiting_thread_count: usize,
@@ -2367,6 +2417,7 @@ impl Sidebar {
         } else {
             color.panel_background
         };
+        let header_bg = sidebar_base_bg.blend(project_color.opacity(0.07));
 
         // The fade gradient renders as a visible patch on transparent windows,
         // so truncate the label instead.
@@ -2376,17 +2427,40 @@ impl Sidebar {
 
         let label = if highlight_positions.is_empty() {
             Label::new(label.clone())
+                .size(LabelSize::Small)
+                .weight(FontWeight::SEMIBOLD)
                 .when(!is_active, |this| this.color(Color::Muted))
                 .when(!opaque_window, |this| this.truncate())
                 .into_any_element()
         } else {
             HighlightedLabel::new(label.clone(), highlight_positions.to_vec())
+                .size(LabelSize::Small)
+                .weight(FontWeight::SEMIBOLD)
                 .when(!is_active, |this| this.color(Color::Muted))
                 .when(!opaque_window, |this| this.truncate())
                 .into_any_element()
         };
 
-        let base_bg = color.background.blend(sidebar_base_bg);
+        let project_badge = h_flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .min_w(px(20.))
+            .h(px(15.))
+            .px(px(3.5))
+            .rounded(px(3.5))
+            .bg(project_color.opacity(0.18))
+            .border_1()
+            .border_color(project_color.opacity(0.32))
+            .child(
+                Label::new(abbreviation.clone())
+                    .size(LabelSize::XSmall)
+                    .weight(FontWeight::SEMIBOLD)
+                    .line_height_style(LineHeightStyle::UiLabel)
+                    .color(Color::Custom(project_color)),
+            );
+
+        let base_bg = color.background.blend(header_bg);
 
         let hover_solid = base_bg.blend(color.ghost_element_hover);
         let active_solid = base_bg.blend(color.ghost_element_active);
@@ -2407,10 +2481,11 @@ impl Sidebar {
             .group(&group_name)
             .when(!has_filter, |this| this.cursor_pointer())
             .relative()
-            .h(Tab::content_height(cx))
+            .h(px(24.))
             .w_full()
-            .pl_2()
-            .pr_1p5()
+            .pl_1p5()
+            .pr_1()
+            .bg(header_bg)
             .justify_between()
             .border_1()
             .border_r_2()
@@ -2422,15 +2497,26 @@ impl Sidebar {
                 }
             })
             .when(!has_filter, |this| {
-                this.hover(|s| s.bg(color.ghost_element_hover))
-                    .group_active(&group_name, |s| s.bg(color.ghost_element_active))
+                this.hover(|s| s.bg(hover_solid))
+                    .group_active(&group_name, |s| s.bg(active_solid))
             })
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top_0()
+                    .bottom_0()
+                    .w(px(2.))
+                    .bg(project_color.opacity(0.8)),
+            )
             .child(
                 h_flex()
                     .relative()
                     .min_w_0()
                     .w_full()
-                    .gap_1()
+                    .gap_1p5()
+                    .items_center()
+                    .child(project_badge)
                     .child(label)
                     .when_some(self.render_remote_project_icon(ix, host), |this, icon| {
                         this.child(icon)
@@ -3260,6 +3346,8 @@ impl Sidebar {
         let ListEntry::ProjectHeader {
             key,
             label,
+            abbreviation,
+            project_color,
             highlight_positions,
             has_running_threads,
             waiting_thread_count,
@@ -3279,6 +3367,8 @@ impl Sidebar {
             true,
             key,
             &label,
+            &abbreviation,
+            *project_color,
             &highlight_positions,
             *has_running_threads,
             *waiting_thread_count,
@@ -5921,6 +6011,8 @@ impl Sidebar {
                         title: thread.metadata.display_title(),
                         icon: thread.icon,
                         icon_from_external_svg: thread.icon_from_external_svg.clone(),
+                        project_badge: thread.project_badge.clone(),
+                        agent_badge: thread.agent_badge.clone(),
                         status: thread.status,
                         metadata: thread.metadata.clone(),
                         workspace,
@@ -5946,6 +6038,8 @@ impl Sidebar {
                         format_history_entry_timestamp(terminal.metadata.created_at).into();
                     Some(ThreadSwitcherEntry::Terminal(ThreadSwitcherTerminalEntry {
                         metadata: terminal.metadata.clone(),
+                        project_badge: terminal.project_badge.clone(),
+                        agent_badge: terminal.agent_badge.clone(),
                         workspace: terminal.workspace.clone(),
                         project_name: current_header_label.clone(),
                         worktrees: terminal
@@ -6306,10 +6400,14 @@ impl Sidebar {
 
         let thread_item = ThreadItem::new(id, title.clone())
             .base_bg(sidebar_bg)
+            .rounded(true)
             .icon(icon)
             .when(is_draft, |this| {
                 this.icon_color(Color::Custom(cx.theme().colors().icon_muted.opacity(0.2)))
             })
+            .draft(is_draft)
+            .project_badge(thread.project_badge.clone())
+            .agent_badge(thread.agent_badge.clone())
             .status(thread.status)
             .is_remote(is_remote)
             .when_some(icon_svg, |this, svg| {
@@ -6635,8 +6733,11 @@ impl Sidebar {
 
         let terminal_item = ThreadItem::new(id, title)
             .base_bg(sidebar_bg)
+            .rounded(true)
             .icon(IconName::Terminal)
             .when_some(icon_char, |this, icon_char| this.icon_char(icon_char))
+            .project_badge(terminal.project_badge.clone())
+            .agent_badge(terminal.agent_badge.clone())
             .is_remote(is_remote)
             .worktrees(worktrees)
             .timestamp(timestamp)

@@ -6045,7 +6045,10 @@ impl AgentPanel {
                                 if let Some(icon_path) = icon_path {
                                     entry = entry.custom_icon_svg(icon_path);
                                 } else {
-                                    entry = entry.icon(IconName::Sparkle);
+                                    entry = entry.icon(
+                                        agent_servers::builtin_icon_for_agent_id(item.id.as_ref())
+                                            .unwrap_or(IconName::Sparkle),
+                                    );
                                 }
 
                                 entry = entry

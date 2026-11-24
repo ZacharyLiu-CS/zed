@@ -19,6 +19,23 @@ pub const CLAUDE_AGENT_ID: &str = "claude-acp";
 pub const CODEX_ID: &str = "codex-acp";
 pub const CURSOR_ID: &str = "cursor";
 
+pub fn builtin_icon_for_agent_id(agent_id: &str) -> Option<IconName> {
+    let lower = agent_id.to_lowercase();
+    if lower.contains("claude") || lower.contains("anthropic") {
+        Some(IconName::AiClaude)
+    } else if lower.contains("codex") || lower.contains("openai") {
+        Some(IconName::AiOpenAi)
+    } else if lower.contains("gemini") {
+        Some(IconName::AiGemini)
+    } else if lower.contains("opencode") || lower.contains("open-code") {
+        Some(IconName::AiOpenCode)
+    } else if lower.contains("copilot") {
+        Some(IconName::Copilot)
+    } else {
+        None
+    }
+}
+
 /// A generic agent server implementation for custom user-defined agents
 pub struct CustomAgentServer {
     agent_id: AgentId,
@@ -36,7 +53,7 @@ impl AgentServer for CustomAgentServer {
     }
 
     fn logo(&self) -> IconName {
-        IconName::Terminal
+        builtin_icon_for_agent_id(self.agent_id.as_ref()).unwrap_or(IconName::Terminal)
     }
 
     fn default_mode(&self, cx: &App) -> Option<acp_v2::SessionConfigValueId> {

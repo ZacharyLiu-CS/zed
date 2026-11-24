@@ -8,7 +8,10 @@ use gpui::{
     Action as _, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Modifiers,
     ModifiersChangedEvent, Render, ScrollHandle, SharedString, prelude::*,
 };
-use ui::{AgentThreadStatus, ThreadItem, ThreadItemWorktreeInfo, WithScrollbar, prelude::*};
+use ui::{
+    AgentThreadStatus, ThreadItem, ThreadItemAgentBadge, ThreadItemProjectBadge,
+    ThreadItemWorktreeInfo, WithScrollbar, prelude::*,
+};
 use workspace::{ModalView, Workspace};
 use zed_actions::agents_sidebar::ToggleThreadSwitcher;
 
@@ -19,6 +22,8 @@ pub(crate) struct ThreadSwitcherThreadEntry {
     pub title: SharedString,
     pub icon: IconName,
     pub icon_from_external_svg: Option<SharedString>,
+    pub project_badge: ThreadItemProjectBadge,
+    pub agent_badge: ThreadItemAgentBadge,
     pub status: AgentThreadStatus,
     pub metadata: ThreadMetadata,
     pub workspace: Entity<Workspace>,
@@ -34,6 +39,8 @@ pub(crate) struct ThreadSwitcherThreadEntry {
 #[derive(Clone)]
 pub(crate) struct ThreadSwitcherTerminalEntry {
     pub metadata: TerminalThreadMetadata,
+    pub project_badge: ThreadItemProjectBadge,
+    pub agent_badge: ThreadItemAgentBadge,
     pub(super) workspace: ThreadEntryWorkspace,
     pub project_name: Option<SharedString>,
     pub worktrees: Vec<ThreadItemWorktreeInfo>,
@@ -162,6 +169,20 @@ impl ThreadSwitcherEntry {
         match self {
             Self::Thread(entry) => entry.diff_stats,
             Self::Terminal(_) => DiffStats::default(),
+        }
+    }
+
+    fn project_badge(&self) -> ThreadItemProjectBadge {
+        match self {
+            Self::Thread(entry) => entry.project_badge.clone(),
+            Self::Terminal(entry) => entry.project_badge.clone(),
+        }
+    }
+
+    fn agent_badge(&self) -> ThreadItemAgentBadge {
+        match self {
+            Self::Thread(entry) => entry.agent_badge.clone(),
+            Self::Terminal(entry) => entry.agent_badge.clone(),
         }
     }
 
@@ -385,6 +406,9 @@ impl Render for ThreadSwitcher {
                                     cx.theme().colors().icon_muted.opacity(0.2),
                                 ))
                             })
+                            .draft(entry.is_draft())
+                            .project_badge(entry.project_badge())
+                            .agent_badge(entry.agent_badge())
                             .status(entry.status())
                             .when_some(entry.icon_from_external_svg(), |this, svg| {
                                 this.custom_icon_from_external_svg(svg)

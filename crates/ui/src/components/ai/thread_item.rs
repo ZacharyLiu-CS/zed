@@ -1,7 +1,10 @@
-use crate::{CommonAnimationExt, DiffStat, GradientFade, HighlightedLabel, Tooltip, prelude::*};
+use crate::{
+    CommonAnimationExt, DiffStat, GradientFade, HighlightedLabel, LineHeightStyle, Tooltip,
+    prelude::*,
+};
 
 use gpui::{
-    Animation, AnimationExt, ClickEvent, Hsla, MouseButton, SharedString,
+    Animation, AnimationExt, ClickEvent, FontWeight, Hsla, MouseButton, SharedString,
     WindowBackgroundAppearance, pulsating_between,
 };
 use itertools::Itertools as _;
@@ -33,6 +36,22 @@ pub struct ThreadItemWorktreeInfo {
     pub kind: WorktreeKind,
 }
 
+#[derive(Clone, Debug)]
+pub struct ThreadItemProjectBadge {
+    pub abbreviation: SharedString,
+    pub color: Hsla,
+    pub full_name: Option<SharedString>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ThreadItemAgentBadge {
+    pub label: SharedString,
+    pub icon: IconName,
+    pub custom_icon_from_external_svg: Option<SharedString>,
+    pub color: Option<Hsla>,
+    pub tooltip: Option<SharedString>,
+}
+
 #[derive(IntoElement, RegisterComponent)]
 pub struct ThreadItem {
     id: ElementId,
@@ -41,6 +60,9 @@ pub struct ThreadItem {
     icon_color: Option<Color>,
     icon_visible: bool,
     custom_icon_from_external_svg: Option<SharedString>,
+    project_badge: Option<ThreadItemProjectBadge>,
+    agent_badge: Option<ThreadItemAgentBadge>,
+    draft: bool,
     title: SharedString,
     title_slot: Option<AnyElement>,
     title_label_color: Option<Color>,
@@ -76,6 +98,9 @@ impl ThreadItem {
             icon_color: None,
             icon_visible: true,
             custom_icon_from_external_svg: None,
+            project_badge: None,
+            agent_badge: None,
+            draft: false,
             title: title.into(),
             title_slot: None,
             title_label_color: None,
@@ -132,6 +157,21 @@ impl ThreadItem {
 
     pub fn custom_icon_from_external_svg(mut self, svg: impl Into<SharedString>) -> Self {
         self.custom_icon_from_external_svg = Some(svg.into());
+        self
+    }
+
+    pub fn project_badge(mut self, badge: ThreadItemProjectBadge) -> Self {
+        self.project_badge = Some(badge);
+        self
+    }
+
+    pub fn agent_badge(mut self, badge: ThreadItemAgentBadge) -> Self {
+        self.agent_badge = Some(badge);
+        self
+    }
+
+    pub fn draft(mut self, draft: bool) -> Self {
+        self.draft = draft;
         self
     }
 
@@ -354,6 +394,9 @@ impl RenderOnce for ThreadItem {
             icon_container().child(agent_icon).into_any_element()
         };
 
+        let use_badge_layout = self.project_badge.is_some() || self.agent_badge.is_some();
+        let should_truncate_title = !opaque_window || (use_badge_layout && self.is_truncated);
+
         let title = self.title;
         let highlight_positions = self.highlight_positions;
 
@@ -362,7 +405,7 @@ impl RenderOnce for ThreadItem {
         } else if self.title_generating {
             Label::new(title)
                 .color(Color::Muted)
-                .when(!opaque_window, |label| label.truncate())
+                .when(should_truncate_title, |label| label.truncate())
                 .with_animation(
                     "generating-title",
                     Animation::new(Duration::from_secs(2))
@@ -374,12 +417,12 @@ impl RenderOnce for ThreadItem {
         } else if highlight_positions.is_empty() {
             Label::new(title)
                 .when_some(self.title_label_color, |label, color| label.color(color))
-                .when(!opaque_window, |label| label.truncate())
+                .when(should_truncate_title, |label| label.truncate())
                 .into_any_element()
         } else {
             HighlightedLabel::new(title, highlight_positions)
                 .when_some(self.title_label_color, |label, color| label.color(color))
-                .when(!opaque_window, |label| label.truncate())
+                .when(should_truncate_title, |label| label.truncate())
                 .into_any_element()
         };
 
@@ -420,6 +463,368 @@ impl RenderOnce for ThreadItem {
             .collect();
 
         let has_worktree = !linked_worktrees.is_empty();
+
+        if use_badge_layout {
+            let compact_status_indicator: Option<AnyElement> = match self.status {
+                AgentThreadStatus::Running => Some(
+                    Icon::new(IconName::LoadCircle)
+                        .size(IconSize::XSmall)
+                        .color(Color::Accent)
+                        .with_rotate_animation(2)
+                        .into_any_element(),
+                ),
+                AgentThreadStatus::WaitingForConfirmation => Some(
+                    Icon::new(IconName::Warning)
+                        .size(IconSize::XSmall)
+                        .color(Color::Warning)
+                        .into_any_element(),
+                ),
+                AgentThreadStatus::Error => Some(
+                    Icon::new(IconName::Close)
+                        .size(IconSize::XSmall)
+                        .color(Color::Error)
+                        .into_any_element(),
+                ),
+                AgentThreadStatus::Unconfirmed => Some(
+                    Icon::new(IconName::Info)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted)
+                        .into_any_element(),
+                ),
+                AgentThreadStatus::Completed => {
+                    if self.draft {
+                        Some(
+                            Icon::new(IconName::Pencil)
+                                .size(IconSize::XSmall)
+                                .color(Color::Warning)
+                                .into_any_element(),
+                        )
+                    } else if self.notified {
+                        Some(
+                            div()
+                                .size(px(6.))
+                                .rounded_full()
+                                .flex_none()
+                                .bg(color.text_accent)
+                                .into_any_element(),
+                        )
+                    } else {
+                        None
+                    }
+                }
+            };
+
+            let project_badge_element = self.project_badge.map(|badge| {
+                h_flex()
+                    .id(format!("project-badge-{}", self.id))
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .min_w(px(22.))
+                    .h(px(16.))
+                    .px(px(4.))
+                    .rounded(px(4.))
+                    .bg(badge.color.opacity(0.16))
+                    .border_1()
+                    .border_color(badge.color.opacity(0.28))
+                    .child(
+                        Label::new(badge.abbreviation)
+                            .size(LabelSize::XSmall)
+                            .weight(FontWeight::SEMIBOLD)
+                            .line_height_style(LineHeightStyle::UiLabel)
+                            .color(Color::Custom(badge.color)),
+                    )
+                    .when_some(badge.full_name, |this, full_name| {
+                        this.tooltip(Tooltip::text(full_name))
+                    })
+                    .into_any_element()
+            });
+
+            let agent_badge_element = self.agent_badge.map(|badge| {
+                let badge_icon_color = badge
+                    .color
+                    .map(Color::Custom)
+                    .unwrap_or(Color::Muted);
+                let badge_text_color = badge
+                    .color
+                    .map(Color::Custom)
+                    .unwrap_or(Color::Muted);
+                let badge_bg = badge
+                    .color
+                    .map(|c| c.opacity(0.12))
+                    .unwrap_or_else(|| color.element_background.opacity(0.65));
+
+                let badge_icon = if let Some(svg) = badge.custom_icon_from_external_svg {
+                    Icon::from_external_svg(svg)
+                        .size(IconSize::XSmall)
+                        .color(badge_icon_color)
+                        .into_any_element()
+                } else {
+                    Icon::new(badge.icon)
+                        .size(IconSize::XSmall)
+                        .color(badge_icon_color)
+                        .into_any_element()
+                };
+
+                h_flex()
+                    .id(format!("agent-badge-{}", self.id))
+                    .flex_none()
+                    .items_center()
+                    .gap_1()
+                    .h(px(16.))
+                    .px(px(5.))
+                    .rounded(px(4.))
+                    .bg(badge_bg)
+                    .child(badge_icon)
+                    .child(
+                        Label::new(badge.label)
+                            .size(LabelSize::XSmall)
+                            .weight(FontWeight::MEDIUM)
+                            .line_height_style(LineHeightStyle::UiLabel)
+                            .color(badge_text_color),
+                    )
+                    .when_some(badge.tooltip, |this, tooltip| {
+                        this.tooltip(Tooltip::text(tooltip))
+                    })
+                    .into_any_element()
+            });
+
+            let has_secondary_metadata = self.archived
+                || has_project_name
+                || has_project_paths
+                || has_worktree
+                || has_diff_stats;
+            let show_second_row = has_secondary_metadata || agent_badge_element.is_some();
+            let show_action_slot = self.hovered && self.action_slot.is_some();
+
+            return v_flex()
+                .id(self.id.clone())
+                .cursor_pointer()
+                .group("thread-item")
+                .relative()
+                .flex_shrink_0()
+                .overflow_hidden()
+                .w_full()
+                .py(px(3.))
+                .px(px(6.))
+                .when(self.selected, |s| s.bg(color.ghost_element_selected))
+                .border_1()
+                .border_r_2()
+                .border_color(gpui::transparent_black())
+                .when(self.focused, |s| s.border_color(color.panel_focused_border))
+                .when(self.rounded, |s| s.rounded_md())
+                .hover(|s| s.bg(color.ghost_element_hover))
+                .active(|s| s.bg(color.ghost_element_active))
+                .on_hover(self.on_hover)
+                .child(
+                    h_flex()
+                        .min_w_0()
+                        .w_full()
+                        .h(px(20.))
+                        .gap_1p5()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            h_flex()
+                                .id("content")
+                                .min_w_0()
+                                .flex_1()
+                                .gap_1p5()
+                                .items_center()
+                                .when_some(compact_status_indicator, |this, indicator| {
+                                    this.child(indicator)
+                                })
+                                .when_some(project_badge_element, |this, badge| this.child(badge))
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .flex_1()
+                                        .overflow_hidden()
+                                        .child(title_label),
+                                ),
+                        )
+                        .when(show_action_slot, |this| {
+                            this.when_some(self.action_slot, |this, slot| {
+                                this.child(
+                                    h_flex()
+                                        .flex_none()
+                                        .child(slot)
+                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                            cx.stop_propagation()
+                                        }),
+                                )
+                            })
+                        })
+                        .when(!show_action_slot && has_timestamp, |this| {
+                            this.child(
+                                Label::new(timestamp.clone())
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted)
+                                    .flex_none(),
+                            )
+                        }),
+                )
+                .when(show_second_row, |this| {
+                    this.child(
+                        h_flex()
+                            .min_w_0()
+                            .w_full()
+                            .h(px(16.))
+                            .mt(px(2.))
+                            .gap_1p5()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                h_flex()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .gap_1()
+                                    .items_center()
+                                    .overflow_hidden()
+                                    .when(self.archived, |this| {
+                                        this.child(
+                                            Icon::new(IconName::Archive)
+                                                .size(IconSize::XSmall)
+                                                .color(Color::Custom(
+                                                    cx.theme().colors().icon_muted.opacity(0.5),
+                                                )),
+                                        )
+                                    })
+                                    .when(
+                                        has_project_name || has_project_paths || has_worktree,
+                                        |this| {
+                                            this.when_some(self.project_name, |this, name| {
+                                                this.child(
+                                                    Label::new(name)
+                                                        .size(LabelSize::XSmall)
+                                                        .color(Color::Muted)
+                                                        .truncate(),
+                                                )
+                                            })
+                                            .when(
+                                                has_project_name
+                                                    && (has_project_paths || has_worktree),
+                                                |this| this.child(dot_separator()),
+                                            )
+                                            .when_some(project_paths, |this, paths| {
+                                                this.child(
+                                                    Label::new(paths)
+                                                        .size(LabelSize::XSmall)
+                                                        .color(Color::Muted)
+                                                        .truncate(),
+                                                )
+                                            })
+                                            .when(has_project_paths && has_worktree, |this| {
+                                                this.child(dot_separator())
+                                            })
+                                            .children(linked_worktrees.into_iter().map(|wt| {
+                                                let worktree_label =
+                                                    wt.worktree_name.clone().map(|name| {
+                                                        if wt.highlight_positions.is_empty() {
+                                                            Label::new(name)
+                                                                .size(LabelSize::XSmall)
+                                                                .color(Color::Muted)
+                                                                .truncate()
+                                                                .into_any_element()
+                                                        } else {
+                                                            HighlightedLabel::new(
+                                                                name,
+                                                                wt.highlight_positions.clone(),
+                                                            )
+                                                            .size(LabelSize::XSmall)
+                                                            .color(Color::Muted)
+                                                            .truncate()
+                                                            .into_any_element()
+                                                        }
+                                                    });
+
+                                                let chip_icon = if wt.worktree_name.is_none()
+                                                    && wt.branch_name.is_some()
+                                                {
+                                                    IconName::GitBranch
+                                                } else {
+                                                    IconName::GitWorktree
+                                                };
+
+                                                let branch_label = wt.branch_name.map(|branch| {
+                                                    Label::new(branch)
+                                                        .size(LabelSize::XSmall)
+                                                        .color(Color::Muted)
+                                                        .truncate()
+                                                        .into_any_element()
+                                                });
+
+                                                let show_separator = worktree_label.is_some()
+                                                    && branch_label.is_some();
+
+                                                h_flex()
+                                                    .min_w_0()
+                                                    .gap_0p5()
+                                                    .items_center()
+                                                    .child(
+                                                        Icon::new(chip_icon)
+                                                            .size(IconSize::XSmall)
+                                                            .color(Color::Muted),
+                                                    )
+                                                    .when_some(worktree_label, |this, label| {
+                                                        this.child(label)
+                                                    })
+                                                    .when(show_separator, |this| {
+                                                        this.child(
+                                                            Label::new("/")
+                                                                .size(LabelSize::XSmall)
+                                                                .color(separator_color)
+                                                                .flex_shrink_0(),
+                                                        )
+                                                    })
+                                                    .when_some(branch_label, |this, label| {
+                                                        this.child(label)
+                                                    })
+                                            }))
+                                        },
+                                    )
+                                    .when(
+                                        (has_project_name || has_project_paths || has_worktree)
+                                            && has_diff_stats,
+                                        |this| this.child(dot_separator()),
+                                    )
+                                    .when(has_diff_stats, |this| {
+                                        this.child(DiffStat::new(
+                                            diff_stat_id,
+                                            added_count,
+                                            removed_count,
+                                        ))
+                                    }),
+                            )
+                            .when_some(agent_badge_element, |this, badge| this.child(badge)),
+                    )
+                })
+                .when(show_tooltip, |this| {
+                    let status = self.status;
+                    this.tooltip(Tooltip::element(move |_, _| match status {
+                        AgentThreadStatus::Error => h_flex()
+                            .gap_1()
+                            .child(
+                                Icon::new(IconName::Close)
+                                    .size(IconSize::Small)
+                                    .color(Color::Error),
+                            )
+                            .child(Label::new("Thread has an Error"))
+                            .into_any_element(),
+                        AgentThreadStatus::WaitingForConfirmation => h_flex()
+                            .gap_1()
+                            .child(
+                                Icon::new(IconName::Warning)
+                                    .size(IconSize::Small)
+                                    .color(Color::Warning),
+                            )
+                            .child(Label::new("Waiting for Confirmation"))
+                            .into_any_element(),
+                        _ => gpui::Empty.into_any_element(),
+                    }))
+                })
+                .when_some(self.on_click, |this, on_click| this.on_click(on_click));
+        }
 
         let has_metadata = has_project_name
             || has_project_paths
@@ -985,6 +1390,66 @@ impl Component for ThreadItem {
                     )
                     .into_any_element(),
             ),
+            single_example(
+                "Compact Project & Agent Badges",
+                container()
+                    .p_1()
+                    .gap_0p5()
+                    .child(
+                        ThreadItem::new("ti-10", "FallbackDataCache 数据进入路径分析")
+                            .rounded(true)
+                            .draft(true)
+                            .selected(true)
+                            .project_badge(ThreadItemProjectBadge {
+                                abbreviation: "AP".into(),
+                                color: gpui::hsla(195.0 / 360.0, 0.78, 0.56, 1.0),
+                                full_name: Some("adt_projects".into()),
+                            })
+                            .agent_badge(ThreadItemAgentBadge {
+                                label: "claude".into(),
+                                icon: IconName::AiClaude,
+                                custom_icon_from_external_svg: None,
+                                color: Some(gpui::hsla(15.0 / 360.0, 0.78, 0.62, 1.0)),
+                                tooltip: Some("Claude".into()),
+                            })
+                            .timestamp("2h"),
+                    )
+                    .child(
+                        ThreadItem::new("ti-11", "仓库结构与现状梳理")
+                            .rounded(true)
+                            .project_badge(ThreadItemProjectBadge {
+                                abbreviation: "DP".into(),
+                                color: gpui::hsla(152.0 / 360.0, 0.68, 0.50, 1.0),
+                                full_name: Some("dop_projects".into()),
+                            })
+                            .agent_badge(ThreadItemAgentBadge {
+                                label: "codex".into(),
+                                icon: IconName::AiOpenAi,
+                                custom_icon_from_external_svg: None,
+                                color: Some(gpui::hsla(162.0 / 360.0, 0.60, 0.56, 1.0)),
+                                tooltip: Some("Codex".into()),
+                            })
+                            .timestamp("3h"),
+                    )
+                    .child(
+                        ThreadItem::new("ti-12", "early_attrs_ 为 false 的行为")
+                            .rounded(true)
+                            .project_badge(ThreadItemProjectBadge {
+                                abbreviation: "CA".into(),
+                                color: gpui::hsla(34.0 / 360.0, 0.80, 0.58, 1.0),
+                                full_name: Some("ceph-agent".into()),
+                            })
+                            .agent_badge(ThreadItemAgentBadge {
+                                label: "codebuddy-code".into(),
+                                icon: IconName::Sparkle,
+                                custom_icon_from_external_svg: None,
+                                color: Some(gpui::hsla(268.0 / 360.0, 0.76, 0.69, 1.0)),
+                                tooltip: Some("CodeBuddy".into()),
+                            })
+                            .timestamp("4d"),
+                    )
+                    .into_any_element(),
+            ),
         ];
 
         example_group(thread_item_examples)
@@ -1022,6 +1487,66 @@ mod tests {
         assert_eq!(painted_backgrounds(cx).first(), Some(&active));
         cx.simulate_mouse_up(position, MouseButton::Left, Modifiers::default());
         assert_eq!(view.read_with(cx, |view, _| view.clicks), 1);
+    }
+
+    #[gpui::test]
+    fn test_badge_layout_action_click_does_not_trigger_row_click(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = settings::SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+        });
+        let (view, cx) = cx.add_window_view(|_, _| BadgeThreadItemTestView { clicks: 0 });
+        let action_bounds = cx
+            .debug_bounds("BADGE_ACTION_SLOT")
+            .expect("badge action bounds");
+        let action_position = action_bounds.center();
+        cx.simulate_mouse_move(action_position, None, Modifiers::default());
+        cx.simulate_mouse_down(action_position, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_up(action_position, MouseButton::Left, Modifiers::default());
+        assert_eq!(view.read_with(cx, |view, _| view.clicks), 0);
+
+        let row_position = point(px(30.), action_bounds.center().y);
+        cx.simulate_mouse_move(row_position, None, Modifiers::default());
+        cx.simulate_mouse_down(row_position, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_up(row_position, MouseButton::Left, Modifiers::default());
+        assert_eq!(view.read_with(cx, |view, _| view.clicks), 1);
+    }
+
+    struct BadgeThreadItemTestView {
+        clicks: usize,
+    }
+
+    impl Render for BadgeThreadItemTestView {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().p(px(20.)).child(
+                div().w(px(260.)).child(
+                    ThreadItem::new("badge-thread", "Badge Thread")
+                        .rounded(true)
+                        .hovered(true)
+                        .timestamp("2h")
+                        .project_badge(ThreadItemProjectBadge {
+                            abbreviation: "AP".into(),
+                            color: gpui::blue(),
+                            full_name: Some("adt_projects".into()),
+                        })
+                        .agent_badge(ThreadItemAgentBadge {
+                            label: "claude".into(),
+                            icon: IconName::AiClaude,
+                            custom_icon_from_external_svg: None,
+                            color: Some(gpui::red()),
+                            tooltip: Some("Claude".into()),
+                        })
+                        .action_slot(
+                            div().debug_selector(|| "BADGE_ACTION_SLOT".to_owned()).child(
+                                IconButton::new("badge-action", IconName::Archive)
+                                    .on_click(|_, _, _| {}),
+                            ),
+                        )
+                        .on_click(cx.listener(|view, _, _, _| view.clicks += 1)),
+                ),
+            )
+        }
     }
 
     struct ThreadItemTestView {

@@ -1499,9 +1499,23 @@ async fn test_neighboring_activatable_entry_stays_within_project(cx: &mut TestAp
     let sidebar = setup_sidebar(&multi_workspace, cx);
     let workspace = multi_workspace.read_with(cx, |mw, _| mw.workspace().clone());
 
+    let test_project_badge = || ThreadItemProjectBadge {
+        abbreviation: "MP".into(),
+        color: gpui::blue(),
+        full_name: Some("my-project".into()),
+    };
+    let test_agent_badge = || ThreadItemAgentBadge {
+        label: "zed".into(),
+        icon: IconName::ZedAgent,
+        custom_icon_from_external_svg: None,
+        color: Some(gpui::blue()),
+        tooltip: Some("Zed Agent".into()),
+    };
     let header = |path: &str| ListEntry::ProjectHeader {
         key: ProjectGroupKey::new(None, PathList::new(&[std::path::PathBuf::from(path)])),
         label: path.into(),
+        abbreviation: project_abbreviation(path),
+        project_color: gpui::blue(),
         highlight_positions: Vec::new(),
         has_running_threads: false,
         waiting_thread_count: 0,
@@ -1526,6 +1540,8 @@ async fn test_neighboring_activatable_entry_stays_within_project(cx: &mut TestAp
             },
             icon: IconName::ZedAgent,
             icon_from_external_svg: None,
+            project_badge: test_project_badge(),
+            agent_badge: test_agent_badge(),
             status: AgentThreadStatus::Completed,
             workspace: ThreadEntryWorkspace::Open(workspace.clone()),
             is_live: false,
@@ -1589,12 +1605,26 @@ async fn test_visible_entries_as_strings(cx: &mut TestAppContext) {
 
     sidebar.update_in(cx, |s, _window, _cx| {
         let notified_thread_id = ThreadId::new();
+        let test_project_badge = || ThreadItemProjectBadge {
+            abbreviation: "EP".into(),
+            color: gpui::blue(),
+            full_name: Some("expanded-project".into()),
+        };
+        let test_agent_badge = || ThreadItemAgentBadge {
+            label: "zed".into(),
+            icon: IconName::ZedAgent,
+            custom_icon_from_external_svg: None,
+            color: Some(gpui::blue()),
+            tooltip: Some("Zed Agent".into()),
+        };
         s.contents.notified_threads.insert(notified_thread_id);
         s.contents.entries = vec![
             // Expanded project header
             ListEntry::ProjectHeader {
                 key: ProjectGroupKey::new(None, expanded_path.clone()),
                 label: "expanded-project".into(),
+                abbreviation: "EP".into(),
+                project_color: gpui::blue(),
                 highlight_positions: Vec::new(),
                 has_running_threads: false,
                 waiting_thread_count: 0,
@@ -1618,6 +1648,8 @@ async fn test_visible_entries_as_strings(cx: &mut TestAppContext) {
                 },
                 icon: IconName::ZedAgent,
                 icon_from_external_svg: None,
+                project_badge: test_project_badge(),
+                agent_badge: test_agent_badge(),
                 status: AgentThreadStatus::Completed,
                 workspace: ThreadEntryWorkspace::Open(workspace.clone()),
                 is_live: false,
@@ -1645,6 +1677,8 @@ async fn test_visible_entries_as_strings(cx: &mut TestAppContext) {
                 },
                 icon: IconName::ZedAgent,
                 icon_from_external_svg: None,
+                project_badge: test_project_badge(),
+                agent_badge: test_agent_badge(),
                 status: AgentThreadStatus::Running,
                 workspace: ThreadEntryWorkspace::Open(workspace.clone()),
                 is_live: true,
@@ -1672,6 +1706,8 @@ async fn test_visible_entries_as_strings(cx: &mut TestAppContext) {
                 },
                 icon: IconName::ZedAgent,
                 icon_from_external_svg: None,
+                project_badge: test_project_badge(),
+                agent_badge: test_agent_badge(),
                 status: AgentThreadStatus::Error,
                 workspace: ThreadEntryWorkspace::Open(workspace.clone()),
                 is_live: true,
@@ -1700,6 +1736,8 @@ async fn test_visible_entries_as_strings(cx: &mut TestAppContext) {
                 },
                 icon: IconName::ZedAgent,
                 icon_from_external_svg: None,
+                project_badge: test_project_badge(),
+                agent_badge: test_agent_badge(),
                 status: AgentThreadStatus::WaitingForConfirmation,
                 workspace: ThreadEntryWorkspace::Open(workspace.clone()),
                 is_live: false,
@@ -1728,6 +1766,8 @@ async fn test_visible_entries_as_strings(cx: &mut TestAppContext) {
                 },
                 icon: IconName::ZedAgent,
                 icon_from_external_svg: None,
+                project_badge: test_project_badge(),
+                agent_badge: test_agent_badge(),
                 status: AgentThreadStatus::Completed,
                 workspace: ThreadEntryWorkspace::Open(workspace.clone()),
                 is_live: true,
@@ -1742,6 +1782,8 @@ async fn test_visible_entries_as_strings(cx: &mut TestAppContext) {
             ListEntry::ProjectHeader {
                 key: ProjectGroupKey::new(None, collapsed_path.clone()),
                 label: "collapsed-project".into(),
+                abbreviation: "CP".into(),
+                project_color: gpui::green(),
                 highlight_positions: Vec::new(),
                 has_running_threads: false,
                 waiting_thread_count: 0,

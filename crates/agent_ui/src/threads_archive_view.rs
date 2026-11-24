@@ -638,7 +638,8 @@ impl ThreadsArchiveView {
                 let icon = if thread.agent_id.as_ref() == agent::ZED_AGENT_ID.as_ref() {
                     IconName::ZedAgent
                 } else {
-                    IconName::Sparkle
+                    agent_servers::builtin_icon_for_agent_id(thread.agent_id.as_ref())
+                        .unwrap_or(IconName::Sparkle)
                 };
 
                 let is_restoring = self.restoring.contains(&thread.thread_id);

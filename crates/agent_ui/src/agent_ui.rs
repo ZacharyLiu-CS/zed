@@ -570,7 +570,10 @@ impl Agent {
     pub fn icon(&self) -> Option<IconName> {
         match self {
             Self::NativeAgent => None,
-            Self::Custom { .. } => Some(IconName::Sparkle),
+            Self::Custom { id } => Some(
+                agent_servers::builtin_icon_for_agent_id(id.as_ref())
+                    .unwrap_or(IconName::Sparkle),
+            ),
             #[cfg(any(test, feature = "test-support"))]
             Self::Stub => None,
         }

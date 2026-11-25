@@ -114,6 +114,7 @@ mod message_queue;
 mod subagent_card;
 mod thread_search_bar;
 mod thread_view;
+mod turn_navigator;
 pub use message_queue::*;
 pub use thread_view::*;
 

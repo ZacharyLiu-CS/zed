@@ -814,6 +814,8 @@ pub struct ThreadView {
     dismissed_skill_loading_issues: HashSet<SkillLoadingIssue>,
     pub(crate) thread_search_bar: Option<Entity<super::thread_search_bar::ThreadSearchBar>>,
     pub(crate) thread_search_visible: bool,
+    hovered_navigator_turn: Option<usize>,
+    last_scroll_top_item: Option<usize>,
 }
 impl Focusable for ThreadView {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
@@ -1336,6 +1338,8 @@ impl ThreadView {
             dismissed_skill_loading_issues: HashSet::default(),
             thread_search_bar: None,
             thread_search_visible: false,
+            hovered_navigator_turn: None,
+            last_scroll_top_item: None,
         };
 
         this.sync_reported_activity(cx);
@@ -1359,6 +1363,10 @@ impl ThreadView {
                             thread.update(cx, |thread, _cx| {
                                 thread.set_ui_scroll_position(Some(scroll_top));
                             });
+                        }
+                        if this.last_scroll_top_item != Some(scroll_top.item_ix) {
+                            this.last_scroll_top_item = Some(scroll_top.item_ix);
+                            cx.notify();
                         }
                         this.schedule_save(cx);
                     });
@@ -7656,14 +7664,18 @@ impl ThreadView {
                                 })
                             }
                             AssistantMessageChunk::Thought { block, .. } => {
-                                let this_is_blank = !block.visible_content(cx);
-                                is_blank = is_blank && this_is_blank;
-                                (!this_is_blank).then(|| {
-                                    self.render_thinking_block(
-                                        entry_ix, chunk_ix, block, window, cx,
-                                    )
-                                    .into_any_element()
-                                })
+                                if super::turn_navigator::hide_thinking_and_tools_enabled() {
+                                    None
+                                } else {
+                                    let this_is_blank = !block.visible_content(cx);
+                                    is_blank = is_blank && this_is_blank;
+                                    (!this_is_blank).then(|| {
+                                        self.render_thinking_block(
+                                            entry_ix, chunk_ix, block, window, cx,
+                                        )
+                                        .into_any_element()
+                                    })
+                                }
                             }
                         },
                     ))
@@ -7692,6 +7704,13 @@ impl ThreadView {
                 }
             }
             AgentThreadEntry::ToolCall(tool_call) => {
+                if super::turn_navigator::should_hide_tool_call(
+                    tool_call,
+                    super::turn_navigator::hide_thinking_and_tools_enabled(),
+                ) {
+                    return Empty.into_any();
+                }
+
                 // A canceled tool call that produced visible output is still worth
                 // showing, but one that was canceled before producing anything just
                 // renders as a useless "Canceled" card — hide those entirely.
@@ -8364,6 +8383,13 @@ impl ThreadView {
             item_ix: entry_ix,
             offset_in_item: px(0.),
         });
+        cx.notify();
+    }
+
+    fn toggle_hide_thinking_and_tools(&mut self, cx: &mut Context<Self>) {
+        super::turn_navigator::toggle_hide_thinking_and_tools();
+        self.list_state
+            .remeasure_items(0..self.list_state.item_count());
         cx.notify();
     }
 
@@ -13941,6 +13967,59 @@ impl Render for ThreadView {
 
         let has_messages = self.has_visible_conversation(cx);
         let list_state = self.list_state.clone();
+        let hide_steps_enabled = super::turn_navigator::hide_thinking_and_tools_enabled();
+        let (hide_steps_toggle, turn_navigator_overlay) = if has_messages {
+            let thread = self.thread.read(cx);
+            let hideable_steps = super::turn_navigator::count_hideable_steps(thread.entries(), cx);
+            let turns = super::turn_navigator::collect_conversation_turns(thread, cx);
+            let active_turn = super::turn_navigator::active_turn_index(
+                &turns,
+                self.list_state.logical_scroll_top().item_ix,
+            );
+            let hovered_turn = self
+                .hovered_navigator_turn
+                .filter(|&index| index < turns.len());
+            let view_for_toggle = cx.entity().downgrade();
+            let toggle = super::turn_navigator::render_hide_steps_toggle(
+                hide_steps_enabled,
+                hideable_steps,
+                move |_, cx| {
+                    view_for_toggle
+                        .update(cx, |this, cx| this.toggle_hide_thinking_and_tools(cx))
+                        .ok();
+                },
+                cx,
+            );
+            let view_for_hover = cx.entity().downgrade();
+            let view_for_select = cx.entity().downgrade();
+            let navigator = super::turn_navigator::render_turn_navigator(
+                &turns,
+                active_turn,
+                hovered_turn,
+                move |turn_ix, _, cx| {
+                    view_for_hover
+                        .update(cx, |this, cx| {
+                            if this.hovered_navigator_turn != turn_ix {
+                                this.hovered_navigator_turn = turn_ix;
+                                cx.notify();
+                            }
+                        })
+                        .ok();
+                },
+                move |entry_ix, _, cx| {
+                    view_for_select
+                        .update(cx, |this, cx| {
+                            this.hovered_navigator_turn = None;
+                            this.scroll_to_entry(entry_ix, cx);
+                        })
+                        .ok();
+                },
+                cx,
+            );
+            (toggle, navigator)
+        } else {
+            (None, None)
+        };
 
         let conversation = v_flex()
             .when(self.resumed_without_history, |this| {
@@ -13948,9 +14027,32 @@ impl Render for ThreadView {
             })
             .map(|this| {
                 if has_messages {
-                    this.flex_1()
+                    this.relative()
+                        .flex_1()
                         .size_full()
                         .child(self.render_entries(cx))
+                        .when_some(hide_steps_toggle, |this, toggle| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .top(px(8.))
+                                    .right(px(14.))
+                                    .child(toggle),
+                            )
+                        })
+                        .when_some(turn_navigator_overlay, |this, navigator| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .top(px(40.))
+                                    .bottom(px(16.))
+                                    .right(px(14.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_end()
+                                    .child(navigator),
+                            )
+                        })
                         .vertical_scrollbar_for(&list_state, window, cx)
                         .into_any()
                 } else {
@@ -13961,6 +14063,11 @@ impl Render for ThreadView {
         v_flex()
             .key_context("AcpThread")
             .track_focus(&self.focus_handle)
+            .on_action(cx.listener(
+                |this, _: &super::turn_navigator::ToggleHideThinkingAndTools, _, cx| {
+                    this.toggle_hide_thinking_and_tools(cx);
+                },
+            ))
             .on_action(cx.listener(|this, _: &menu::Cancel, _, cx| {
                 if this.parent_session_id.is_none() {
                     this.cancel_generation(cx);

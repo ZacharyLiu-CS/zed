@@ -1499,9 +1499,14 @@ async fn test_neighboring_activatable_entry_stays_within_project(cx: &mut TestAp
     let sidebar = setup_sidebar(&multi_workspace, cx);
     let workspace = multi_workspace.read_with(cx, |mw, _| mw.workspace().clone());
 
+    let test_project_colors = ProjectBadgeColors {
+        background: gpui::blue().opacity(0.2),
+        foreground: gpui::blue(),
+    };
     let test_project_badge = || ThreadItemProjectBadge {
         abbreviation: "MP".into(),
-        color: gpui::blue(),
+        background: test_project_colors.background,
+        foreground: test_project_colors.foreground,
         full_name: Some("my-project".into()),
     };
     let test_agent_badge = || ThreadItemAgentBadge {
@@ -1515,7 +1520,7 @@ async fn test_neighboring_activatable_entry_stays_within_project(cx: &mut TestAp
         key: ProjectGroupKey::new(None, PathList::new(&[std::path::PathBuf::from(path)])),
         label: path.into(),
         abbreviation: project_abbreviation(path),
-        project_color: gpui::blue(),
+        project_colors: test_project_colors,
         highlight_positions: Vec::new(),
         has_running_threads: false,
         waiting_thread_count: 0,
@@ -1605,9 +1610,14 @@ async fn test_visible_entries_as_strings(cx: &mut TestAppContext) {
 
     sidebar.update_in(cx, |s, _window, _cx| {
         let notified_thread_id = ThreadId::new();
+        let test_project_colors = ProjectBadgeColors {
+            background: gpui::blue().opacity(0.2),
+            foreground: gpui::blue(),
+        };
         let test_project_badge = || ThreadItemProjectBadge {
             abbreviation: "EP".into(),
-            color: gpui::blue(),
+            background: test_project_colors.background,
+            foreground: test_project_colors.foreground,
             full_name: Some("expanded-project".into()),
         };
         let test_agent_badge = || ThreadItemAgentBadge {
@@ -1624,7 +1634,7 @@ async fn test_visible_entries_as_strings(cx: &mut TestAppContext) {
                 key: ProjectGroupKey::new(None, expanded_path.clone()),
                 label: "expanded-project".into(),
                 abbreviation: "EP".into(),
-                project_color: gpui::blue(),
+                project_colors: test_project_colors,
                 highlight_positions: Vec::new(),
                 has_running_threads: false,
                 waiting_thread_count: 0,
@@ -1783,7 +1793,10 @@ async fn test_visible_entries_as_strings(cx: &mut TestAppContext) {
                 key: ProjectGroupKey::new(None, collapsed_path.clone()),
                 label: "collapsed-project".into(),
                 abbreviation: "CP".into(),
-                project_color: gpui::green(),
+                project_colors: ProjectBadgeColors {
+                    background: gpui::green().opacity(0.2),
+                    foreground: gpui::green(),
+                },
                 highlight_positions: Vec::new(),
                 has_running_threads: false,
                 waiting_thread_count: 0,

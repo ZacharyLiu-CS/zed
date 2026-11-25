@@ -39,7 +39,8 @@ pub struct ThreadItemWorktreeInfo {
 #[derive(Clone, Debug)]
 pub struct ThreadItemProjectBadge {
     pub abbreviation: SharedString,
-    pub color: Hsla,
+    pub background: Hsla,
+    pub foreground: Hsla,
     pub full_name: Option<SharedString>,
 }
 
@@ -416,11 +417,17 @@ impl RenderOnce for ThreadItem {
                 .into_any_element()
         } else if highlight_positions.is_empty() {
             Label::new(title)
+                .when(use_badge_layout && self.selected, |label| {
+                    label.weight(FontWeight::MEDIUM)
+                })
                 .when_some(self.title_label_color, |label, color| label.color(color))
                 .when(should_truncate_title, |label| label.truncate())
                 .into_any_element()
         } else {
             HighlightedLabel::new(title, highlight_positions)
+                .when(use_badge_layout && self.selected, |label| {
+                    label.weight(FontWeight::MEDIUM)
+                })
                 .when_some(self.title_label_color, |label, color| label.color(color))
                 .when(should_truncate_title, |label| label.truncate())
                 .into_any_element()
@@ -520,19 +527,17 @@ impl RenderOnce for ThreadItem {
                     .flex_none()
                     .items_center()
                     .justify_center()
-                    .min_w(px(22.))
+                    .min_w(px(20.))
                     .h(px(16.))
                     .px(px(4.))
-                    .rounded(px(4.))
-                    .bg(badge.color.opacity(0.16))
-                    .border_1()
-                    .border_color(badge.color.opacity(0.28))
+                    .rounded(px(4.5))
+                    .bg(badge.background)
                     .child(
                         Label::new(badge.abbreviation)
                             .size(LabelSize::XSmall)
-                            .weight(FontWeight::SEMIBOLD)
+                            .weight(FontWeight::BOLD)
                             .line_height_style(LineHeightStyle::UiLabel)
-                            .color(Color::Custom(badge.color)),
+                            .color(Color::Custom(badge.foreground)),
                     )
                     .when_some(badge.full_name, |this, full_name| {
                         this.tooltip(Tooltip::text(full_name))
@@ -545,23 +550,15 @@ impl RenderOnce for ThreadItem {
                     .color
                     .map(Color::Custom)
                     .unwrap_or(Color::Muted);
-                let badge_text_color = badge
-                    .color
-                    .map(Color::Custom)
-                    .unwrap_or(Color::Muted);
-                let badge_bg = badge
-                    .color
-                    .map(|c| c.opacity(0.12))
-                    .unwrap_or_else(|| color.element_background.opacity(0.65));
 
                 let badge_icon = if let Some(svg) = badge.custom_icon_from_external_svg {
                     Icon::from_external_svg(svg)
-                        .size(IconSize::XSmall)
+                        .size(IconSize::Small)
                         .color(badge_icon_color)
                         .into_any_element()
                 } else {
                     Icon::new(badge.icon)
-                        .size(IconSize::XSmall)
+                        .size(IconSize::Small)
                         .color(badge_icon_color)
                         .into_any_element()
                 };
@@ -572,16 +569,13 @@ impl RenderOnce for ThreadItem {
                     .items_center()
                     .gap_1()
                     .h(px(16.))
-                    .px(px(5.))
-                    .rounded(px(4.))
-                    .bg(badge_bg)
                     .child(badge_icon)
                     .child(
                         Label::new(badge.label)
                             .size(LabelSize::XSmall)
                             .weight(FontWeight::MEDIUM)
                             .line_height_style(LineHeightStyle::UiLabel)
-                            .color(badge_text_color),
+                            .color(Color::Muted),
                     )
                     .when_some(badge.tooltip, |this, tooltip| {
                         this.tooltip(Tooltip::text(tooltip))
@@ -605,14 +599,20 @@ impl RenderOnce for ThreadItem {
                 .flex_shrink_0()
                 .overflow_hidden()
                 .w_full()
-                .py(px(3.))
-                .px(px(6.))
+                .py(px(4.))
+                .px(px(7.))
                 .when(self.selected, |s| s.bg(color.ghost_element_selected))
                 .border_1()
-                .border_r_2()
-                .border_color(gpui::transparent_black())
-                .when(self.focused, |s| s.border_color(color.panel_focused_border))
-                .when(self.rounded, |s| s.rounded_md())
+                .map(|s| {
+                    if self.focused {
+                        s.border_color(color.panel_focused_border)
+                    } else if self.selected {
+                        s.border_color(color.border_variant)
+                    } else {
+                        s.border_color(gpui::transparent_black())
+                    }
+                })
+                .when(self.rounded, |s| s.rounded(px(7.)))
                 .hover(|s| s.bg(color.ghost_element_hover))
                 .active(|s| s.bg(color.ghost_element_active))
                 .on_hover(self.on_hover)
@@ -1402,7 +1402,8 @@ impl Component for ThreadItem {
                             .selected(true)
                             .project_badge(ThreadItemProjectBadge {
                                 abbreviation: "AP".into(),
-                                color: gpui::hsla(195.0 / 360.0, 0.78, 0.56, 1.0),
+                                background: gpui::hsla(202.0 / 360.0, 0.72, 0.20, 0.90),
+                                foreground: gpui::hsla(199.0 / 360.0, 0.92, 0.68, 1.0),
                                 full_name: Some("adt_projects".into()),
                             })
                             .agent_badge(ThreadItemAgentBadge {
@@ -1419,7 +1420,8 @@ impl Component for ThreadItem {
                             .rounded(true)
                             .project_badge(ThreadItemProjectBadge {
                                 abbreviation: "DP".into(),
-                                color: gpui::hsla(152.0 / 360.0, 0.68, 0.50, 1.0),
+                                background: gpui::hsla(158.0 / 360.0, 0.62, 0.18, 0.90),
+                                foreground: gpui::hsla(156.0 / 360.0, 0.76, 0.58, 1.0),
                                 full_name: Some("dop_projects".into()),
                             })
                             .agent_badge(ThreadItemAgentBadge {
@@ -1436,7 +1438,8 @@ impl Component for ThreadItem {
                             .rounded(true)
                             .project_badge(ThreadItemProjectBadge {
                                 abbreviation: "CA".into(),
-                                color: gpui::hsla(34.0 / 360.0, 0.80, 0.58, 1.0),
+                                background: gpui::hsla(34.0 / 360.0, 0.68, 0.20, 0.90),
+                                foreground: gpui::hsla(38.0 / 360.0, 0.92, 0.66, 1.0),
                                 full_name: Some("ceph-agent".into()),
                             })
                             .agent_badge(ThreadItemAgentBadge {
@@ -1527,7 +1530,8 @@ mod tests {
                         .timestamp("2h")
                         .project_badge(ThreadItemProjectBadge {
                             abbreviation: "AP".into(),
-                            color: gpui::blue(),
+                            background: gpui::hsla(202.0 / 360.0, 0.72, 0.20, 0.90),
+                            foreground: gpui::hsla(199.0 / 360.0, 0.92, 0.68, 1.0),
                             full_name: Some("adt_projects".into()),
                         })
                         .agent_badge(ThreadItemAgentBadge {

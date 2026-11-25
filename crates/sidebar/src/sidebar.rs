@@ -2,7 +2,8 @@ mod agent_badges;
 mod thread_switcher;
 
 use crate::agent_badges::{
-    project_abbreviation, project_color_for_key, resolve_agent_badge, resolve_terminal_agent_badge,
+    ProjectBadgeColors, default_project_badge_colors, project_abbreviation, project_colors_for_key,
+    resolve_agent_badge, resolve_terminal_agent_badge,
 };
 
 use acp_thread::ThreadStatus;
@@ -34,7 +35,7 @@ use feature_flags::{
 };
 use gpui::{
     Action as _, AnyElement, App, ClickEvent, Context, Decorations, DismissEvent, Entity, EntityId,
-    FocusHandle, Focusable, FontWeight, Hsla, KeyContext, ListState, Modifiers, Pixels, Render,
+    FocusHandle, Focusable, FontWeight, KeyContext, ListState, Modifiers, Pixels, Render,
     SharedString, Task, TaskExt, WeakEntity, Window, WindowBackgroundAppearance, WindowHandle,
     linear_color_stop, linear_gradient, list, prelude::*, px,
 };
@@ -413,7 +414,7 @@ enum ListEntry {
         key: ProjectGroupKey,
         label: SharedString,
         abbreviation: SharedString,
-        project_color: Hsla,
+        project_colors: ProjectBadgeColors,
         highlight_positions: Vec<usize>,
         has_running_threads: bool,
         waiting_thread_count: usize,
@@ -881,12 +882,18 @@ impl Sidebar {
 
         let mut previous_default_width =
             AgentSettings::get_global(cx).threads_sidebar.default_width;
+        let mut previous_is_light = cx.theme().appearance().is_light();
         cx.observe_global::<SettingsStore>(move |this, cx| {
             let width = AgentSettings::get_global(cx).threads_sidebar.default_width;
             if previous_default_width != width {
                 previous_default_width = width;
                 this.set_width(None, cx);
                 this.serialize(cx);
+            }
+            let is_light = cx.theme().appearance().is_light();
+            if previous_is_light != is_light {
+                previous_is_light = is_light;
+                this.update_entries(cx);
             }
         })
         .detach();
@@ -1522,14 +1529,15 @@ impl Sidebar {
                 SharedString::default()
             };
             let abbreviation = project_abbreviation(label.as_ref());
-            let project_color = if has_group_paths {
-                project_color_for_key(group_key, &mut used_project_color_indices, cx)
+            let project_colors = if has_group_paths {
+                project_colors_for_key(group_key, &mut used_project_color_indices, cx)
             } else {
-                cx.theme().colors().text_accent
+                default_project_badge_colors(cx)
             };
             let project_badge = ThreadItemProjectBadge {
                 abbreviation: abbreviation.clone(),
-                color: project_color,
+                background: project_colors.background,
+                foreground: project_colors.foreground,
                 full_name: has_group_paths.then(|| label.clone()),
             };
 
@@ -1986,7 +1994,7 @@ impl Sidebar {
                     key: group_key.clone(),
                     label,
                     abbreviation,
-                    project_color,
+                    project_colors,
                     highlight_positions: workspace_highlight_positions,
                     has_running_threads,
                     waiting_thread_count,
@@ -2034,7 +2042,7 @@ impl Sidebar {
                     key: group_key.clone(),
                     label,
                     abbreviation,
-                    project_color,
+                    project_colors,
                     highlight_positions: Vec::new(),
                     has_running_threads,
                     waiting_thread_count,
@@ -2292,7 +2300,7 @@ impl Sidebar {
                 key,
                 label,
                 abbreviation,
-                project_color,
+                project_colors,
                 highlight_positions,
                 has_running_threads,
                 waiting_thread_count,
@@ -2311,7 +2319,7 @@ impl Sidebar {
                     key,
                     label,
                     abbreviation,
-                    *project_color,
+                    *project_colors,
                     highlight_positions,
                     *has_running_threads,
                     *waiting_thread_count,
@@ -2336,14 +2344,14 @@ impl Sidebar {
                     v_flex()
                         .w_full()
                         .border_t_1()
-                        .border_color(cx.theme().colors().border)
+                        .border_color(cx.theme().colors().border_variant)
                         .child(rendered),
                 )
                 .into_any_element()
         } else if is_item_entry {
             div()
                 .w_full()
-                .px_1()
+                .px_1p5()
                 .py(px(1.))
                 .child(rendered)
                 .into_any_element()
@@ -2383,7 +2391,7 @@ impl Sidebar {
         key: &ProjectGroupKey,
         label: &SharedString,
         abbreviation: &SharedString,
-        project_color: Hsla,
+        project_colors: ProjectBadgeColors,
         highlight_positions: &[usize],
         has_running_threads: bool,
         waiting_thread_count: usize,
@@ -2417,7 +2425,6 @@ impl Sidebar {
         } else {
             color.panel_background
         };
-        let header_bg = sidebar_base_bg.blend(project_color.opacity(0.07));
 
         // The fade gradient renders as a visible patch on transparent windows,
         // so truncate the label instead.
@@ -2446,21 +2453,19 @@ impl Sidebar {
             .items_center()
             .justify_center()
             .min_w(px(20.))
-            .h(px(15.))
-            .px(px(3.5))
-            .rounded(px(3.5))
-            .bg(project_color.opacity(0.18))
-            .border_1()
-            .border_color(project_color.opacity(0.32))
+            .h(px(16.))
+            .px(px(4.))
+            .rounded(px(4.5))
+            .bg(project_colors.background)
             .child(
                 Label::new(abbreviation.clone())
                     .size(LabelSize::XSmall)
-                    .weight(FontWeight::SEMIBOLD)
+                    .weight(FontWeight::BOLD)
                     .line_height_style(LineHeightStyle::UiLabel)
-                    .color(Color::Custom(project_color)),
+                    .color(Color::Custom(project_colors.foreground)),
             );
 
-        let base_bg = color.background.blend(header_bg);
+        let base_bg = color.background.blend(sidebar_base_bg);
 
         let hover_solid = base_bg.blend(color.ghost_element_hover);
         let active_solid = base_bg.blend(color.ghost_element_active);
@@ -2481,11 +2486,10 @@ impl Sidebar {
             .group(&group_name)
             .when(!has_filter, |this| this.cursor_pointer())
             .relative()
-            .h(px(24.))
+            .h(px(26.))
             .w_full()
-            .pl_1p5()
-            .pr_1()
-            .bg(header_bg)
+            .pl_2()
+            .pr_1p5()
             .justify_between()
             .border_1()
             .border_r_2()
@@ -2497,18 +2501,9 @@ impl Sidebar {
                 }
             })
             .when(!has_filter, |this| {
-                this.hover(|s| s.bg(hover_solid))
-                    .group_active(&group_name, |s| s.bg(active_solid))
+                this.hover(|s| s.bg(color.ghost_element_hover))
+                    .group_active(&group_name, |s| s.bg(color.ghost_element_active))
             })
-            .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .top_0()
-                    .bottom_0()
-                    .w(px(2.))
-                    .bg(project_color.opacity(0.8)),
-            )
             .child(
                 h_flex()
                     .relative()
@@ -3347,7 +3342,7 @@ impl Sidebar {
             key,
             label,
             abbreviation,
-            project_color,
+            project_colors,
             highlight_positions,
             has_running_threads,
             waiting_thread_count,
@@ -3368,7 +3363,7 @@ impl Sidebar {
             key,
             &label,
             &abbreviation,
-            *project_color,
+            *project_colors,
             &highlight_positions,
             *has_running_threads,
             *waiting_thread_count,

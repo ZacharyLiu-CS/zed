@@ -63,16 +63,129 @@ pub(crate) fn project_abbreviation(label: &str) -> SharedString {
     }
 }
 
-pub(crate) fn project_color_for_key(
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ProjectBadgeColors {
+    pub background: Hsla,
+    pub foreground: Hsla,
+}
+
+fn project_badge_palette(is_light: bool) -> [ProjectBadgeColors; 10] {
+    if is_light {
+        [
+            // Sky blue (AP style)
+            ProjectBadgeColors {
+                background: hsla(202.0 / 360.0, 0.82, 0.89, 1.0),
+                foreground: hsla(204.0 / 360.0, 0.86, 0.34, 1.0),
+            },
+            // Emerald (DP style)
+            ProjectBadgeColors {
+                background: hsla(156.0 / 360.0, 0.58, 0.88, 1.0),
+                foreground: hsla(158.0 / 360.0, 0.78, 0.28, 1.0),
+            },
+            // Rose (ZD style)
+            ProjectBadgeColors {
+                background: hsla(345.0 / 360.0, 0.78, 0.91, 1.0),
+                foreground: hsla(344.0 / 360.0, 0.76, 0.40, 1.0),
+            },
+            // Violet
+            ProjectBadgeColors {
+                background: hsla(262.0 / 360.0, 0.74, 0.91, 1.0),
+                foreground: hsla(262.0 / 360.0, 0.68, 0.42, 1.0),
+            },
+            // Amber
+            ProjectBadgeColors {
+                background: hsla(38.0 / 360.0, 0.86, 0.88, 1.0),
+                foreground: hsla(30.0 / 360.0, 0.88, 0.34, 1.0),
+            },
+            // Cyan
+            ProjectBadgeColors {
+                background: hsla(184.0 / 360.0, 0.66, 0.88, 1.0),
+                foreground: hsla(188.0 / 360.0, 0.82, 0.30, 1.0),
+            },
+            // Indigo
+            ProjectBadgeColors {
+                background: hsla(226.0 / 360.0, 0.80, 0.91, 1.0),
+                foreground: hsla(228.0 / 360.0, 0.72, 0.42, 1.0),
+            },
+            // Coral
+            ProjectBadgeColors {
+                background: hsla(14.0 / 360.0, 0.82, 0.90, 1.0),
+                foreground: hsla(12.0 / 360.0, 0.78, 0.38, 1.0),
+            },
+            // Teal
+            ProjectBadgeColors {
+                background: hsla(170.0 / 360.0, 0.58, 0.88, 1.0),
+                foreground: hsla(172.0 / 360.0, 0.80, 0.28, 1.0),
+            },
+            // Fuchsia
+            ProjectBadgeColors {
+                background: hsla(295.0 / 360.0, 0.66, 0.91, 1.0),
+                foreground: hsla(295.0 / 360.0, 0.66, 0.40, 1.0),
+            },
+        ]
+    } else {
+        [
+            // Sky blue (AP style)
+            ProjectBadgeColors {
+                background: hsla(202.0 / 360.0, 0.72, 0.20, 0.92),
+                foreground: hsla(199.0 / 360.0, 0.92, 0.68, 1.0),
+            },
+            // Emerald (DP style)
+            ProjectBadgeColors {
+                background: hsla(158.0 / 360.0, 0.62, 0.18, 0.92),
+                foreground: hsla(156.0 / 360.0, 0.76, 0.58, 1.0),
+            },
+            // Rose (ZD style)
+            ProjectBadgeColors {
+                background: hsla(344.0 / 360.0, 0.58, 0.21, 0.92),
+                foreground: hsla(346.0 / 360.0, 0.90, 0.72, 1.0),
+            },
+            // Violet
+            ProjectBadgeColors {
+                background: hsla(262.0 / 360.0, 0.56, 0.22, 0.92),
+                foreground: hsla(262.0 / 360.0, 0.88, 0.76, 1.0),
+            },
+            // Amber
+            ProjectBadgeColors {
+                background: hsla(34.0 / 360.0, 0.68, 0.20, 0.92),
+                foreground: hsla(38.0 / 360.0, 0.92, 0.66, 1.0),
+            },
+            // Cyan
+            ProjectBadgeColors {
+                background: hsla(184.0 / 360.0, 0.66, 0.19, 0.92),
+                foreground: hsla(184.0 / 360.0, 0.84, 0.62, 1.0),
+            },
+            // Indigo
+            ProjectBadgeColors {
+                background: hsla(228.0 / 360.0, 0.60, 0.22, 0.92),
+                foreground: hsla(226.0 / 360.0, 0.90, 0.74, 1.0),
+            },
+            // Coral
+            ProjectBadgeColors {
+                background: hsla(14.0 / 360.0, 0.64, 0.21, 0.92),
+                foreground: hsla(14.0 / 360.0, 0.90, 0.68, 1.0),
+            },
+            // Teal
+            ProjectBadgeColors {
+                background: hsla(170.0 / 360.0, 0.60, 0.18, 0.92),
+                foreground: hsla(170.0 / 360.0, 0.76, 0.58, 1.0),
+            },
+            // Fuchsia
+            ProjectBadgeColors {
+                background: hsla(295.0 / 360.0, 0.52, 0.22, 0.92),
+                foreground: hsla(296.0 / 360.0, 0.82, 0.74, 1.0),
+            },
+        ]
+    }
+}
+
+pub(crate) fn project_colors_for_key(
     key: &ProjectGroupKey,
     used_indices: &mut HashSet<usize>,
     cx: &App,
-) -> Hsla {
-    let accents = cx.theme().accents();
-    let palette_len = accents.0.len();
-    if palette_len == 0 {
-        return cx.theme().colors().text_accent;
-    }
+) -> ProjectBadgeColors {
+    let palette = project_badge_palette(cx.theme().appearance().is_light());
+    let palette_len = palette.len();
 
     let mut hash_input = String::new();
     if let Some(host) = key.host() {
@@ -95,7 +208,11 @@ pub(crate) fn project_color_for_key(
     };
     used_indices.insert(chosen_index);
 
-    accents.color_for_index(chosen_index as u32)
+    palette[chosen_index]
+}
+
+pub(crate) fn default_project_badge_colors(cx: &App) -> ProjectBadgeColors {
+    project_badge_palette(cx.theme().appearance().is_light())[0]
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -329,12 +446,10 @@ pub(crate) fn resolve_agent_badge(
             .unwrap_or_else(|| agent_id.0.clone())
     };
 
-    let accents = cx.theme().accents();
-    let color = if accents.0.is_empty() {
-        None
-    } else {
-        Some(accents.color_for_index(stable_color_hash(agent_id.as_ref())))
-    };
+    let palette = project_badge_palette(cx.theme().appearance().is_light());
+    let color = Some(
+        palette[(stable_color_hash(agent_id.as_ref()) as usize) % palette.len()].foreground,
+    );
 
     ThreadItemAgentBadge {
         label,
@@ -440,9 +555,9 @@ mod tests {
                 ProjectGroupKey::new(None, PathList::new(&[PathBuf::from("/ceph-agent")])),
             ];
 
-            let colors: Vec<Hsla> = keys
+            let colors: Vec<ProjectBadgeColors> = keys
                 .iter()
-                .map(|key| project_color_for_key(key, &mut used, cx))
+                .map(|key| project_colors_for_key(key, &mut used, cx))
                 .collect();
 
             for i in 0..colors.len() {
@@ -454,6 +569,34 @@ mod tests {
                 }
             }
         });
+    }
+
+    #[test]
+    fn test_light_and_dark_palettes_have_high_contrast() {
+        for colors in project_badge_palette(true) {
+            assert!(
+                colors.background.l >= 0.85,
+                "light badge background should stay soft pastel, got {}",
+                colors.background.l
+            );
+            assert!(
+                colors.foreground.l <= 0.45,
+                "light badge foreground should stay dark and readable, got {}",
+                colors.foreground.l
+            );
+        }
+        for colors in project_badge_palette(false) {
+            assert!(
+                colors.background.l <= 0.25,
+                "dark badge background should stay deep, got {}",
+                colors.background.l
+            );
+            assert!(
+                colors.foreground.l >= 0.55,
+                "dark badge foreground should stay bright and readable, got {}",
+                colors.foreground.l
+            );
+        }
     }
 
     #[gpui::test]

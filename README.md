@@ -1,6 +1,39 @@
 > [!IMPORTANT]
 > Remove this line to confirm you've reviewed this PR before submitting.
 
+# Zed Custom (`custom-sidebar`)
+
+基于上游 Zed 官方稳定版维护的个人定制发行版，重点重构了 **Agent Panel 侧边栏** 与 **长对话阅读/跳转体验**，并通过 GitHub Actions 自动追更上游稳定版与推送客户端自动更新。
+
+<p align="center">
+  <img src="./docs/images/custom-agent-sidebar.png" alt="Custom Agent Panel Preview" width="680" />
+</p>
+
+### 定制增强特性
+
+- **紧凑高信息密度 Agent 侧边栏（参考 T3 Code 风格）**
+  - **彩色文件夹缩写徽章**：按项目名自动生成 2 位大写缩写（如 `adt_projects` → `AP`、`dop-scripts` → `DS`、`ceph-agent` → `CA`），为不同文件夹分配高区分度独立配色，亮色/暗色主题独立调校、切换主题即时刷新。
+  - **清晰的 Agent 类型与图标识别**：右侧直观显示启动该会话的 Agent 图标与名称，自动支持 `claude`、`codex`、`cursor`、`codebuddy-code`、`zed`、`gemini`、`opencode`、`copilot` 以及任意自定义 ACP（如 `tclaude`、`tcodex`、`remote-claude` 自动继承对应品牌图标与配色并保留自定义名称）。
+  - **精致卡片选中态与清晰分组边界**：去掉多余外框与厚重底色，暗色与亮色主题下均保持通透清晰。
+- **Agent 对话阅读增强**
+  - **一键隐藏思考与命令执行**：对话右上角提供 `Hide steps` / `Steps hidden` 开关（同时支持 Action `agent::ToggleHideThinkingAndTools`），一键折叠所有 `Thinking` 块与已完成的工具调用 / shell 命令，只保留「你的提问 ↔ Agent 回复」（正在等待确认、运行中或出错的步骤始终保持可见）。
+  - **右侧对话进度刻度尺导航**：对话包含多轮提问时，右侧边显示波浪刻度尺仪表盘，高亮当前阅读进度；鼠标悬停任意刻度弹出该轮问题与回复摘要卡片，点击一键跳转至对应提问。
+- **与官方 Zed 无缝并存 + 自动追更**
+  - 独立打包为 **`Zed Custom.app`**（`CFBundleIdentifier: dev.zed.Zed-Custom`），与 `/Applications/Zed.app` 并存互不覆盖，同时共享 `stable` 渠道配置、线程历史与官方远端 SSH `zed-remote-server`（无需本机 `zig` 交叉编译）。
+  - GitHub Actions 每天自动检测上游最新稳定版 Tag（`vX.Y.Z`）、自动 rebase、构建签名并发布到 [Releases](https://github.com/ZacharyLiu-CS/zed/releases)；客户端自动检测并原地静默更新 `/Applications/Zed Custom.app`。
+
+### 安装方式（macOS Apple Silicon）
+
+1. 前往 [Releases](https://github.com/ZacharyLiu-CS/zed/releases) 下载最新的 `Zed-Custom-aarch64.dmg`。
+2. 将 `Zed Custom.app` 拖入 `/Applications`（不会覆盖官方 `/Applications/Zed.app`）。
+3. 首次打开前执行一次移除隔离标记，并先退出正在运行的官方 `Zed.app`：
+   ```bash
+   xattr -dr com.apple.quarantine "/Applications/Zed Custom.app"
+   ```
+4. 后续有上游新稳定版或自定义更新时，应用会自动检测并在右下角提示 **Restart to Update**。
+
+---
+
 # Zed
 
 [![Zed](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/zed-industries/zed/main/assets/badge/v0.json)](https://zed.dev)

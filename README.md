@@ -3,67 +3,116 @@
 
 # Zed Custom (`custom-sidebar`)
 
-基于上游 Zed 官方稳定版维护的个人定制发行版，重点重构了 **Agent Panel 侧边栏** 与 **长对话阅读/跳转体验**，并通过 GitHub Actions 自动追更上游稳定版与推送客户端自动更新。
+Zed Custom 是基于 [Zed](https://github.com/zed-industries/zed) 官方稳定版的个人定制版，目前对应上游 **v1.30.2**。
+
+官方 Zed 的 Agent Panel 在会话多、对话长的时候不好用：侧边栏分不清哪个会话属于哪个项目、哪个还在运行；对话记录里大量思考和工具调用步骤，用户的问题被淹没在其中，也没法在多个问题之间快速跳转。
+
+界面设计的灵感来自 [T3 Code](https://github.com/pingdotgg/t3code)：按项目分组的紧凑会话列表、一眼可见的会话状态、干净的对话视图。Zed Custom 把这套思路搬进 Zed，同时保留 Zed 作为编辑器的全部能力。
+
+Zed Custom 只改动 Agent Panel，编辑器的其他部分与上游一致。相对 v1.30.2，定制共改动 18 个文件，约 3.4k 行。
 
 <p align="center">
-  <img src="./docs/images/custom-agent-sidebar.png" alt="Custom Agent Panel Preview" width="680" />
+  <img src="./docs/images/custom-agent-sidebar.png" alt="Zed Custom 界面：左侧 Agent 会话列表，中间对话视图，右侧编辑区" width="1000" />
 </p>
 
-### 定制增强特性
+## 解决了哪些问题
 
-- **紧凑高信息密度 Agent 侧边栏（参考 T3 Code 风格）**
-  - **彩色文件夹缩写徽章**：按项目名自动生成 2 位大写缩写（如 `adt_projects` → `AP`、`dop-scripts` → `DS`、`ceph-agent` → `CA`），为不同文件夹分配高区分度独立配色，亮色/暗色主题独立调校、切换主题即时刷新。
-  - **清晰的字体层级**：Project 标题跟随 Settings 中的 `ui_font_size` 实时缩放，Session 标题自动精确缩小 2 个字号（`-2px`），项目与会话主次分明。
-  - **清晰的 Agent 类型与图标识别**：右侧以透明底精致图标直观显示启动该会话的 Agent 图标与名称，自动支持 `claude`、`codex`、`cursor`、`codebuddy-code`、`zed`、`gemini`、`opencode`、`copilot` 以及任意自定义 ACP（如 `tclaude`、`tcodex`、`remote-claude` 自动继承对应品牌图标与配色并保留自定义名称）。
-- **Agent 对话阅读与时间统计增强**
-  - **用户输入与 AI 回复清晰分区**：用户输入改为**右对齐主题色微染气泡**（带 `You` 与发送时间），AI 输出保持**左对齐全宽**且每段回复起点自动显示 **Agent 品牌图标 + 名称 + 开始时间与执行耗时**，一眼分清谁说的话、回答从哪里开始。
-  - **每轮与整会话执行时间统计**：自动记录每轮提问发送时间、AI 开始时间与执行耗时（运行中实时跳秒，并在顶部栏统计整个会话累计耗时），通过 `KeyValueStore` 持久化，重启 Zed 后历史耗时依然保留。
-  - **一键隐藏思考与命令执行**：对话顶部栏提供 `Hide steps` / `Steps hidden` 开关（同时支持 Action `agent::ToggleHideThinkingAndTools`），一键折叠所有 `Thinking` 块与已完成的工具调用 / shell 命令，只保留「你的提问 ↔ Agent 回复」（等待确认、运行中或出错的步骤始终保持可见）。
-  - **左侧零遮挡进度刻度尺导航**：对话包含多轮提问时，对话左侧独立列显示波浪刻度尺仪表盘（绝不遮挡正文，窄宽度下同样清爽），高亮当前阅读进度；鼠标悬停任意刻度在右侧弹出该轮问题、发送时间、耗时与回复摘要卡片，点击一键跳转。
-- **与官方 Zed 无缝并存 + 自动追更**
-  - 独立打包为 **`Zed Custom.app`**（`CFBundleIdentifier: dev.zed.Zed-Custom`），与 `/Applications/Zed.app` 并存互不覆盖，同时共享 `stable` 渠道配置、线程历史与官方远端 SSH `zed-remote-server`（无需本机 `zig` 交叉编译）。
-  - GitHub Actions 每天自动检测上游最新稳定版 Tag（`vX.Y.Z`）、自动 rebase、构建签名并发布到 [Releases](https://github.com/ZacharyLiu-CS/zed/releases)；客户端自动检测并原地静默更新 `/Applications/Zed Custom.app`。
+| 官方 Zed 的问题 | Zed Custom 的改进 |
+| --- | --- |
+| 侧边栏文字密度高，项目名和会话标题挤在一起 | 项目标题和会话标题分两级字号，会话之间有清晰分组 |
+| 很难分辨会话属于哪个项目 | 每个会话前有项目缩写彩色徽章（如 `AP`、`DS`），同一项目颜色固定 |
+| 很难分辨会话的状态和运行它的 Agent | 每个会话显示状态图标（运行中、等待确认、出错、未读、草稿），以及 Agent 图标与名称 |
+| 对话记录里充斥思考和工具调用步骤，难以阅读 | 一键隐藏已结束的思考和工具调用，只留下提问和回复 |
+| 用户的问题和 AI 的回答混在一起 | 问题靠右显示在气泡中；每轮回答开头标注 Agent、开始时间和耗时 |
+| 多轮对话只能靠滚动查找某个问题 | 左侧刻度导航，悬停预览该轮内容，点击直接跳转 |
+| 不知道每轮花了多长时间 | 记录单轮耗时和会话累计耗时，重启后保留 |
+| 定制版会覆盖官方版，需要手动跟进上游 | 独立的 `Zed Custom.app`，每天自动同步上游稳定版并推送更新 |
 
-### 安装方式（macOS Apple Silicon）
+## 改进详情
 
-1. 前往 [Releases](https://github.com/ZacharyLiu-CS/zed/releases) 下载最新的 `Zed-Custom-aarch64.dmg`。
-2. 将 `Zed Custom.app` 拖入 `/Applications`（不会覆盖官方 `/Applications/Zed.app`）。
-3. 首次打开前执行一次移除隔离标记，并先退出正在运行的官方 `Zed.app`：
-   ```bash
+### 侧边栏：一眼看清项目、状态和 Agent
+
+**原来的问题**：所有会话以相同样式平铺，文字密集。会话多了以后，很难分辨它属于哪个项目、是否还在运行、由哪个 Agent 处理。
+
+**现在的做法**：
+
+- **项目徽章**：根据项目名生成两个大写字母，例如 `adt_projects` → `AP`、`dop-scripts` → `DS`。项目标题和其下每个会话都带有这个徽章。不同项目颜色不同，同一项目颜色固定；亮色和暗色主题各有一套配色。
+- **字号层级**：项目标题随 `ui_font_size` 缩放，会话标题固定比项目标题小 2px。项目之间用分隔线隔开，主次一目了然。
+- **状态图标**：会话标题旁直接显示当前状态，无需点进去查看：
+
+  | 图标 | 含义 |
+  | --- | --- |
+  | 旋转的圆圈 | 正在运行 |
+  | 黄色警告 | 等待你确认 |
+  | 红色叉号 | 出错 |
+  | 蓝色圆点 | 已完成，有未读结果 |
+  | 铅笔 | 草稿，尚未发送 |
+
+- **Agent 标识**：会话右侧显示运行它的 Agent 图标和名称。内置识别 `claude`、`codex`、`cursor`、`gemini`、`opencode`、`copilot` 和 `zed`。自定义 ACP 名称中含有这些关键字时（如 `remote-claude`、`tclaude`），使用对应的图标和颜色，但保留原名称。
+
+### 对话记录：只看你关心的内容
+
+**原来的问题**：一次回答中间穿插大量思考过程、命令执行和文件读取，真正的回复被埋在里面。
+
+**现在的做法**：点击对话顶部的 `Hide steps`，隐藏所有思考内容以及已完成或已取消的工具调用，只留下你的提问和 AI 的回复。等待确认、正在运行或出错的步骤仍会显示，不会错过需要你处理的事情。也可以在命令面板中运行 `agent::ToggleHideThinkingAndTools`，或为它绑定快捷键。
+
+### 提问与回答：谁说的一目了然
+
+**原来的问题**：用户消息和 AI 回答使用相似的排版，在长对话中很难找到每个问题从哪里开始、回答从哪里开始。
+
+**现在的做法**：
+
+- 你的消息靠右显示在气泡中，上方标注 `You` 和发送时间。
+- AI 的回复靠左，每轮开头显示 Agent 图标、名称、开始时间和耗时，运行中实时更新。
+
+### 多轮对话：直接跳到任意一个问题
+
+**原来的问题**：对话有十几轮时，只能来回滚动寻找之前问过的某个问题。
+
+**现在的做法**：对话左侧出现一列刻度，每个刻度对应一个问题，当前所在的轮次会高亮。悬停刻度可预览该轮的问题、发送时间、耗时和回复摘要；点击刻度直接跳到对应提问。刻度列单独占位，不会遮住正文。
+
+### 耗时统计
+
+- 每轮记录发送时间、开始时间、结束时间和耗时，正在运行的轮次实时计时。
+- 对话顶部显示整个会话的累计耗时。
+- 数据保存在本地数据库中，重启 Zed 后仍然可见。
+
+### 安装与更新
+
+- **与官方版并存**：应用名为 `Zed Custom.app`，Bundle ID 为 `dev.zed.Zed-Custom`，不会覆盖 `/Applications/Zed.app`。两者共用设置、会话历史和远程连接，远程开发直接使用官方对应版本的 `zed-remote-server`。
+- **自动同步上游**：GitHub Actions 每天北京时间 12:00 检查上游最新稳定版。有新版本时，自动把 `custom-sidebar` rebase 到新版本，构建并发布到 [Releases](https://github.com/ZacharyLiu-CS/zed/releases)。没有新版本时跳过；rebase 冲突时构建失败，需要手动处理。配置见 [`custom-release.yml`](./.github/workflows/custom-release.yml)。
+- **自动更新**：应用从本仓库 Releases 检查更新，发现新构建后下载并替换 `/Applications/Zed Custom.app`。即使上游版本号不变，定制代码更新后重新构建的版本也会推送。
+- **构建提速**：发布构建关闭了 LTO 和调试信息，缩短 CI 时间。
+
+## 安装（macOS Apple Silicon）
+
+1. 从 [Releases](https://github.com/ZacharyLiu-CS/zed/releases) 下载最新的 `Zed-Custom-aarch64.dmg`。
+2. 把 `Zed Custom.app` 拖到 `/Applications`。
+3. 第一次打开前，先退出官方 Zed，然后移除隔离标记：
+
+   ```sh
    xattr -dr com.apple.quarantine "/Applications/Zed Custom.app"
    ```
-4. 后续有上游新稳定版或自定义更新时，应用会自动检测并在右下角提示 **Restart to Update**。
 
----
+4. 有新版本时，右下角会出现 **Restart to Update**，点击即可完成更新。
 
-# Zed
+## 已知限制
+
+- 只提供 macOS Apple Silicon 安装包，其他平台需要从源码构建。
+- 与官方 Zed 共用 `~/Library/Application Support/Zed`。不要同时运行两个版本，切换前先退出另一个。
+- `Hide steps` 的开关状态不会保存，重启后恢复为显示全部步骤。
+- 上游大幅改动 Agent Panel 时，自动 rebase 可能失败，需要手动解决冲突后才能发布新版本。
+
+## 关于上游 Zed
 
 [![Zed](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/zed-industries/zed/main/assets/badge/v0.json)](https://zed.dev)
 [![CI](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml/badge.svg)](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml)
 
-Welcome to Zed, a high-performance, multiplayer code editor from the creators of [Atom](https://github.com/atom/atom) and [Tree-sitter](https://github.com/tree-sitter/tree-sitter).
+Zed 是 Zed Industries 开发的高性能多人协作代码编辑器，来自 [Atom](https://github.com/atom/atom) 和 [Tree-sitter](https://github.com/tree-sitter/tree-sitter) 的作者。
 
----
-
-### Installation
-
-On macOS, Linux, and Windows you can [download Zed directly](https://zed.dev/download) or install Zed via your local package manager ([macOS](https://zed.dev/docs/installation#macos)/[Linux](https://zed.dev/docs/linux#installing-via-a-package-manager)/[Windows](https://zed.dev/docs/windows#package-managers)).
-
-Other platforms are not yet available:
-
-- Web ([tracking discussion](https://github.com/zed-industries/zed/discussions/26195))
-
-### Developing Zed
-
-- [Building Zed for macOS](./docs/src/development/macos.md)
-- [Building Zed for Linux](./docs/src/development/linux.md)
-- [Building Zed for Windows](./docs/src/development/windows.md)
-
-### Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for ways you can contribute to Zed.
-
-Also... we're hiring! Check out our [jobs](https://zed.dev/jobs) page for open roles.
+- 官方安装与文档：<https://zed.dev/docs>
+- 参与上游开发：见 [CONTRIBUTING.md](./CONTRIBUTING.md)
+- 构建说明：[macOS](./docs/src/development/macos.md)、[Linux](./docs/src/development/linux.md)、[Windows](./docs/src/development/windows.md)
 
 ### Licensing
 
@@ -81,6 +130,6 @@ We use [`cargo-about`](https://github.com/EmbarkStudios/cargo-about) to automati
 
 Zed is developed by **Zed Industries, Inc.**, a for-profit company.
 
-If you’d like to financially support the project, you can do so via GitHub Sponsors.
+If you'd like to financially support the project, you can do so via GitHub Sponsors.
 Sponsorships go directly to Zed Industries and are used as general company revenue.
 There are no perks or entitlements associated with sponsorship.

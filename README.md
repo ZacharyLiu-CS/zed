@@ -13,11 +13,13 @@
 
 - **紧凑高信息密度 Agent 侧边栏（参考 T3 Code 风格）**
   - **彩色文件夹缩写徽章**：按项目名自动生成 2 位大写缩写（如 `adt_projects` → `AP`、`dop-scripts` → `DS`、`ceph-agent` → `CA`），为不同文件夹分配高区分度独立配色，亮色/暗色主题独立调校、切换主题即时刷新。
-  - **清晰的 Agent 类型与图标识别**：右侧直观显示启动该会话的 Agent 图标与名称，自动支持 `claude`、`codex`、`cursor`、`codebuddy-code`、`zed`、`gemini`、`opencode`、`copilot` 以及任意自定义 ACP（如 `tclaude`、`tcodex`、`remote-claude` 自动继承对应品牌图标与配色并保留自定义名称）。
-  - **精致卡片选中态与清晰分组边界**：去掉多余外框与厚重底色，暗色与亮色主题下均保持通透清晰。
-- **Agent 对话阅读增强**
-  - **一键隐藏思考与命令执行**：对话右上角提供 `Hide steps` / `Steps hidden` 开关（同时支持 Action `agent::ToggleHideThinkingAndTools`），一键折叠所有 `Thinking` 块与已完成的工具调用 / shell 命令，只保留「你的提问 ↔ Agent 回复」（正在等待确认、运行中或出错的步骤始终保持可见）。
-  - **右侧对话进度刻度尺导航**：对话包含多轮提问时，右侧边显示波浪刻度尺仪表盘，高亮当前阅读进度；鼠标悬停任意刻度弹出该轮问题与回复摘要卡片，点击一键跳转至对应提问。
+  - **清晰的字体层级**：Project 标题跟随 Settings 中的 `ui_font_size` 实时缩放，Session 标题自动精确缩小 2 个字号（`-2px`），项目与会话主次分明。
+  - **清晰的 Agent 类型与图标识别**：右侧以透明底精致图标直观显示启动该会话的 Agent 图标与名称，自动支持 `claude`、`codex`、`cursor`、`codebuddy-code`、`zed`、`gemini`、`opencode`、`copilot` 以及任意自定义 ACP（如 `tclaude`、`tcodex`、`remote-claude` 自动继承对应品牌图标与配色并保留自定义名称）。
+- **Agent 对话阅读与时间统计增强**
+  - **用户输入与 AI 回复清晰分区**：用户输入改为**右对齐主题色微染气泡**（带 `You` 与发送时间），AI 输出保持**左对齐全宽**且每段回复起点自动显示 **Agent 品牌图标 + 名称 + 开始时间与执行耗时**，一眼分清谁说的话、回答从哪里开始。
+  - **每轮与整会话执行时间统计**：自动记录每轮提问发送时间、AI 开始时间与执行耗时（运行中实时跳秒，并在顶部栏统计整个会话累计耗时），通过 `KeyValueStore` 持久化，重启 Zed 后历史耗时依然保留。
+  - **一键隐藏思考与命令执行**：对话顶部栏提供 `Hide steps` / `Steps hidden` 开关（同时支持 Action `agent::ToggleHideThinkingAndTools`），一键折叠所有 `Thinking` 块与已完成的工具调用 / shell 命令，只保留「你的提问 ↔ Agent 回复」（等待确认、运行中或出错的步骤始终保持可见）。
+  - **左侧零遮挡进度刻度尺导航**：对话包含多轮提问时，对话左侧独立列显示波浪刻度尺仪表盘（绝不遮挡正文，窄宽度下同样清爽），高亮当前阅读进度；鼠标悬停任意刻度在右侧弹出该轮问题、发送时间、耗时与回复摘要卡片，点击一键跳转。
 - **与官方 Zed 无缝并存 + 自动追更**
   - 独立打包为 **`Zed Custom.app`**（`CFBundleIdentifier: dev.zed.Zed-Custom`），与 `/Applications/Zed.app` 并存互不覆盖，同时共享 `stable` 渠道配置、线程历史与官方远端 SSH `zed-remote-server`（无需本机 `zig` 交叉编译）。
   - GitHub Actions 每天自动检测上游最新稳定版 Tag（`vX.Y.Z`）、自动 rebase、构建签名并发布到 [Releases](https://github.com/ZacharyLiu-CS/zed/releases)；客户端自动检测并原地静默更新 `/Applications/Zed Custom.app`。

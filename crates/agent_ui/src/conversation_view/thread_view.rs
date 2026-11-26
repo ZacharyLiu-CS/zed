@@ -7532,10 +7532,6 @@ impl ThreadView {
                 };
 
                 let colors = cx.theme().colors();
-                let user_bubble_bg = colors
-                    .editor_background
-                    .blend(colors.text_accent.opacity(0.08));
-                let user_bubble_border = colors.text_accent.opacity(0.28);
                 let user_sent_time = self.turn_timings.user_sent_time_label(entry_ix);
 
                 v_flex()
@@ -7586,15 +7582,15 @@ impl ThreadView {
                                 div()
                                     .py_2p5()
                                     .px_3()
-                                    .rounded(px(10.))
-                                    .bg(user_bubble_bg)
+                                    .rounded_md()
+                                    .bg(colors.editor_background)
                                     .border_1()
                                     .when(is_indented, |this| {
                                         this.py_2().px_2p5().when(opaque_window, |this| {
                                             this.shadow_sm()
                                         })
                                     })
-                                    .border_color(user_bubble_border)
+                                    .border_color(colors.border)
                                     .map(|this| {
                                         if !is_editable {
                                             if is_subagent {
@@ -14224,11 +14220,13 @@ impl Render for ThreadView {
                                 .w_full()
                                 .when_some(left_turn_rail, |this, rail| this.child(rail))
                                 .child(
-                                    div()
+                                    v_flex()
                                         .relative()
                                         .flex_1()
                                         .min_w_0()
+                                        .min_h_0()
                                         .h_full()
+                                        .overflow_hidden()
                                         .child(self.render_entries(cx))
                                         .vertical_scrollbar_for(&list_state, window, cx),
                                 )

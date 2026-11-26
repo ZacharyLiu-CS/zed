@@ -63,7 +63,7 @@ use theme::{ActiveTheme, CLIENT_SIDE_DECORATION_ROUNDING};
 use ui::{
     AgentThreadStatus, CommonAnimationExt, ContextMenu, ContextMenuEntry, Divider, GradientFade,
     HighlightedLabel, KeyBinding, LineHeightStyle, PopoverMenu, PopoverMenuHandle,
-    ProjectEmptyState, ScrollAxes, Scrollbars, ThreadItem, ThreadItemAgentBadge,
+    ProjectEmptyState, ScrollAxes, Scrollbars, Tab, ThreadItem, ThreadItemAgentBadge,
     ThreadItemProjectBadge, ThreadItemWorktreeInfo, TintColor, Tooltip, WithScrollbar, prelude::*,
     render_modifiers, right_click_menu,
 };

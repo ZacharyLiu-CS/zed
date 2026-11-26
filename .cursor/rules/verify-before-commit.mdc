@@ -1,0 +1,14 @@
+---
+description: Typecheck the Zed editor binary before committing Rust changes
+alwaysApply: true
+---
+
+# Verify before committing
+
+A merge without conflict markers can still fail `cargo` with exit code 101. Do not commit Rust changes until a typecheck of the editor binary exits 0.
+
+```bash
+cargo check -p zed --bin zed --features gpui_platform/runtime_shaders
+```
+
+Use `gpui_platform/runtime_shaders` when `xcrun metal` is missing. That is the same fallback as `.github/workflows/custom-release.yml`. Fix every `error[E…]` from that command before `git commit`.

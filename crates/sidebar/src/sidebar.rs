@@ -2434,14 +2434,14 @@ impl Sidebar {
 
         let label = if highlight_positions.is_empty() {
             Label::new(label.clone())
-                .size(LabelSize::Small)
+                .size(LabelSize::Default)
                 .weight(FontWeight::SEMIBOLD)
                 .when(!is_active, |this| this.color(Color::Muted))
                 .when(!opaque_window, |this| this.truncate())
                 .into_any_element()
         } else {
             HighlightedLabel::new(label.clone(), highlight_positions.to_vec())
-                .size(LabelSize::Small)
+                .size(LabelSize::Default)
                 .weight(FontWeight::SEMIBOLD)
                 .when(!is_active, |this| this.color(Color::Muted))
                 .when(!opaque_window, |this| this.truncate())
@@ -2486,7 +2486,8 @@ impl Sidebar {
             .group(&group_name)
             .when(!has_filter, |this| this.cursor_pointer())
             .relative()
-            .h(px(26.))
+            .min_h(rems(1.75))
+            .py_0p5()
             .w_full()
             .pl_2()
             .pr_1p5()

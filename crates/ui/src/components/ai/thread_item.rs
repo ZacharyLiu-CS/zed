@@ -291,7 +291,7 @@ impl ThreadItem {
 }
 
 impl RenderOnce for ThreadItem {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let color = cx.theme().colors();
         let raw_bg = self.base_bg.unwrap_or(color.surface_background);
         // The fade gradient paints a solid color over the title to blend it into
@@ -397,6 +397,14 @@ impl RenderOnce for ThreadItem {
 
         let use_badge_layout = self.project_badge.is_some() || self.agent_badge.is_some();
         let should_truncate_title = !opaque_window || (use_badge_layout && self.is_truncated);
+        // Keep session titles strictly 2px smaller than the project header (TextSize::default),
+        // scaling dynamically whenever the user adjusts `ui_font_size` in settings.
+        let compact_title_size = use_badge_layout.then(|| {
+            let rem_px = f32::from(window.rem_size()).max(1.0);
+            let project_px = f32::from(TextSize::default().rems(cx).to_pixels(window.rem_size()));
+            let session_px = (project_px - 2.0).max(9.0);
+            LabelSize::Custom(rems(session_px / rem_px))
+        });
 
         let title = self.title;
         let highlight_positions = self.highlight_positions;
@@ -405,6 +413,7 @@ impl RenderOnce for ThreadItem {
             title_slot
         } else if self.title_generating {
             Label::new(title)
+                .when_some(compact_title_size, |label, size| label.size(size))
                 .color(Color::Muted)
                 .when(should_truncate_title, |label| label.truncate())
                 .with_animation(
@@ -417,6 +426,7 @@ impl RenderOnce for ThreadItem {
                 .into_any_element()
         } else if highlight_positions.is_empty() {
             Label::new(title)
+                .when_some(compact_title_size, |label, size| label.size(size))
                 .when(use_badge_layout && self.selected, |label| {
                     label.weight(FontWeight::MEDIUM)
                 })
@@ -425,6 +435,7 @@ impl RenderOnce for ThreadItem {
                 .into_any_element()
         } else {
             HighlightedLabel::new(title, highlight_positions)
+                .when_some(compact_title_size, |label, size| label.size(size))
                 .when(use_badge_layout && self.selected, |label| {
                     label.weight(FontWeight::MEDIUM)
                 })
@@ -620,7 +631,7 @@ impl RenderOnce for ThreadItem {
                     h_flex()
                         .min_w_0()
                         .w_full()
-                        .h(px(20.))
+                        .min_h(rems(1.25))
                         .gap_1p5()
                         .items_center()
                         .justify_between()

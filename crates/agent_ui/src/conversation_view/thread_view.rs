@@ -816,6 +816,8 @@ pub struct ThreadView {
     pub(crate) thread_search_visible: bool,
     hovered_navigator_turn: Option<usize>,
     last_scroll_top_item: Option<usize>,
+    turn_timings: super::turn_navigator::TurnTimingTracker,
+    _turn_timing_tick_task: Option<Task<()>>,
 }
 impl Focusable for ThreadView {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
@@ -1044,8 +1046,13 @@ impl ThreadView {
     ) -> Self {
         let session_id = thread.read(cx).session_id().clone();
         let parent_session_id = thread.read(cx).parent_session_id().cloned();
+        let turn_timings =
+            super::turn_navigator::TurnTimingTracker::new(&session_id, thread.read(cx), cx);
 
-        subscriptions.push(cx.observe(&thread, |_, _, cx| cx.notify()));
+        subscriptions.push(cx.observe(&thread, |this, _, cx| {
+            this.sync_turn_timings(cx);
+            cx.notify();
+        }));
         subscriptions.push(cx.observe(&conversation, |_, _, cx| cx.notify()));
         subscriptions.push(cx.subscribe(&thread, |this, _, event, cx| {
             if matches!(
@@ -1340,7 +1347,10 @@ impl ThreadView {
             thread_search_visible: false,
             hovered_navigator_turn: None,
             last_scroll_top_item: None,
+            turn_timings,
+            _turn_timing_tick_task: None,
         };
+        this.sync_turn_timings(cx);
 
         this.sync_reported_activity(cx);
         this.sync_generating_indicator(cx);
@@ -7504,6 +7514,13 @@ impl ThreadView {
                     self.agent_id.clone()
                 };
 
+                let colors = cx.theme().colors();
+                let user_bubble_bg = colors
+                    .editor_background
+                    .blend(colors.text_accent.opacity(0.08));
+                let user_bubble_border = colors.text_accent.opacity(0.28);
+                let user_sent_time = self.turn_timings.user_sent_time_label(entry_ix);
+
                 v_flex()
                     .id(("user_message", entry_ix))
                     .map(|this| {
@@ -7514,25 +7531,53 @@ impl ThreadView {
                         }
                     })
                     .pb_3()
-                    .px_2()
-                    .gap_1p5()
+                    .px_3()
+                    .gap_1()
                     .w_full()
+                    .items_end()
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_1()
+                            .pr_1()
+                            .child(
+                                Icon::new(IconName::Person)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Accent),
+                            )
+                            .child(
+                                Label::new("You")
+                                    .size(LabelSize::XSmall)
+                                    .weight(gpui::FontWeight::SEMIBOLD)
+                                    .color(Color::Muted),
+                            )
+                            .when_some(user_sent_time, |this, sent_time| {
+                                this.child(
+                                    Label::new(format!("· {sent_time}"))
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
+                                )
+                            }),
+                    )
                     .child(
                         div()
                             .relative()
+                            .w(relative(0.84))
+                            .max_w(rems(42.))
+                            .min_w_0()
                             .child(
                                 div()
-                                    .py_3()
-                                    .px_2()
-                                    .rounded_md()
-                                    .bg(cx.theme().colors().editor_background)
+                                    .py_2p5()
+                                    .px_3()
+                                    .rounded(px(10.))
+                                    .bg(user_bubble_bg)
                                     .border_1()
                                     .when(is_indented, |this| {
-                                        this.py_2().px_2().when(opaque_window, |this| {
+                                        this.py_2().px_2p5().when(opaque_window, |this| {
                                             this.shadow_sm()
                                         })
                                     })
-                                    .border_color(cx.theme().colors().border)
+                                    .border_color(user_bubble_border)
                                     .map(|this| {
                                         if !is_editable {
                                             if is_subagent {
@@ -7546,7 +7591,7 @@ impl ThreadView {
                                         if editing && !editor_focus {
                                             return this.border_dashed()
                                         }
-                                        this.when(opaque_window, |this| this.shadow_md())
+                                        this.when(opaque_window, |this| this.shadow_sm())
                                             .hover(|s| {
                                                 s.border_color(focus_border.opacity(0.8))
                                             })
@@ -7686,12 +7731,34 @@ impl ThreadView {
                 if is_blank {
                     Empty.into_any()
                 } else {
+                    let entries = self.thread.read(cx).entries();
+                    let show_reply_header = super::turn_navigator::should_show_assistant_reply_header(
+                        entries,
+                        entry_ix,
+                        super::turn_navigator::hide_thinking_and_tools_enabled(),
+                        cx,
+                    );
+                    let reply_header = show_reply_header.then(|| {
+                        let timing = self
+                            .turn_timings
+                            .assistant_timing_for_entry(entries, entry_ix);
+                        super::turn_navigator::render_assistant_reply_header(
+                            &self.agent_id,
+                            &self.agent_display_name,
+                            self.agent_icon,
+                            self.agent_icon_from_external_svg.as_ref(),
+                            timing,
+                            cx,
+                        )
+                    });
+
                     v_flex()
-                        .px_5()
+                        .px_4()
                         .py_1p5()
                         .when(is_thread_bottom, |this| this.pb_4())
                         .w_full()
                         .text_ui(cx)
+                        .when_some(reply_header, |this, header| this.child(header))
                         .child(message_body)
                         .when_some(
                             self.entry_view_state
@@ -8391,6 +8458,37 @@ impl ThreadView {
         self.list_state
             .remeasure_items(0..self.list_state.item_count());
         cx.notify();
+    }
+
+    fn sync_turn_timings(&mut self, cx: &mut Context<Self>) {
+        let thread = self.thread.clone();
+        let is_running = self.turn_timings.sync_with_thread(&thread, cx);
+        if is_running {
+            if self._turn_timing_tick_task.is_none() {
+                self._turn_timing_tick_task = Some(cx.spawn(async move |this, cx| {
+                    loop {
+                        cx.background_executor().timer(Duration::from_secs(1)).await;
+                        let keep_going = this
+                            .update(cx, |this, cx| {
+                                let thread = this.thread.clone();
+                                let still_running =
+                                    this.turn_timings.sync_with_thread(&thread, cx);
+                                cx.notify();
+                                if !still_running {
+                                    this._turn_timing_tick_task = None;
+                                }
+                                still_running
+                            })
+                            .unwrap_or(false);
+                        if !keep_going {
+                            break;
+                        }
+                    }
+                }));
+            }
+        } else {
+            self._turn_timing_tick_task = None;
+        }
     }
 
     fn handle_feedback_click(
@@ -13968,7 +14066,7 @@ impl Render for ThreadView {
         let has_messages = self.has_visible_conversation(cx);
         let list_state = self.list_state.clone();
         let hide_steps_enabled = super::turn_navigator::hide_thinking_and_tools_enabled();
-        let (hide_steps_toggle, turn_navigator_overlay) = if has_messages {
+        let (conversation_top_bar, left_turn_rail, turn_preview_card) = if has_messages {
             let thread = self.thread.read(cx);
             let hideable_steps = super::turn_navigator::count_hideable_steps(thread.entries(), cx);
             let turns = super::turn_navigator::collect_conversation_turns(thread, cx);
@@ -13990,9 +14088,16 @@ impl Render for ThreadView {
                 },
                 cx,
             );
+            let top_bar = super::turn_navigator::render_conversation_top_bar(
+                self.turn_timings.total_session_duration(),
+                self.turn_timings.current_running_duration(),
+                turns.len(),
+                toggle,
+                cx,
+            );
             let view_for_hover = cx.entity().downgrade();
             let view_for_select = cx.entity().downgrade();
-            let navigator = super::turn_navigator::render_turn_navigator(
+            let rail = super::turn_navigator::render_left_turn_rail(
                 &turns,
                 active_turn,
                 hovered_turn,
@@ -14016,9 +14121,15 @@ impl Render for ThreadView {
                 },
                 cx,
             );
-            (toggle, navigator)
+            let preview_card = super::turn_navigator::render_turn_preview_card(
+                &turns,
+                hovered_turn,
+                &self.turn_timings,
+                cx,
+            );
+            (top_bar, rail, preview_card)
         } else {
-            (None, None)
+            (None, None, None)
         };
 
         let conversation = v_flex()
@@ -14027,33 +14138,39 @@ impl Render for ThreadView {
             })
             .map(|this| {
                 if has_messages {
-                    this.relative()
-                        .flex_1()
+                    this.flex_1()
+                        .min_h_0()
                         .size_full()
-                        .child(self.render_entries(cx))
-                        .when_some(hide_steps_toggle, |this, toggle| {
-                            this.child(
-                                div()
-                                    .absolute()
-                                    .top(px(8.))
-                                    .right(px(14.))
-                                    .child(toggle),
-                            )
-                        })
-                        .when_some(turn_navigator_overlay, |this, navigator| {
-                            this.child(
-                                div()
-                                    .absolute()
-                                    .top(px(40.))
-                                    .bottom(px(16.))
-                                    .right(px(14.))
-                                    .flex()
-                                    .items_center()
-                                    .justify_end()
-                                    .child(navigator),
-                            )
-                        })
-                        .vertical_scrollbar_for(&list_state, window, cx)
+                        .when_some(conversation_top_bar, |this, top_bar| this.child(top_bar))
+                        .child(
+                            h_flex()
+                                .relative()
+                                .flex_1()
+                                .min_h_0()
+                                .w_full()
+                                .when_some(left_turn_rail, |this, rail| this.child(rail))
+                                .child(
+                                    div()
+                                        .relative()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .h_full()
+                                        .child(self.render_entries(cx))
+                                        .vertical_scrollbar_for(&list_state, window, cx),
+                                )
+                                .when_some(turn_preview_card, |this, card| {
+                                    this.child(
+                                        div()
+                                            .absolute()
+                                            .left(px(32.))
+                                            .top(px(16.))
+                                            .bottom(px(16.))
+                                            .flex()
+                                            .items_center()
+                                            .child(card),
+                                    )
+                                }),
+                        )
                         .into_any()
                 } else {
                     this.into_any()
